@@ -1,0 +1,346 @@
+-- ██████╗  █████╗ ██████╗ ██╗  ██╗███████╗ ██████╗ ██████╗  ██████╗ ███████╗
+-- ██╔══██╗██╔══██╗██╔══██╗██║ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔═══██╗██╔════╝
+-- ██████╔╝███████║██████╔╝█████╔╝ █████╗  ██║   ██║██████╔╝██║   ██║███████╗
+-- ██╔══██╗██╔══██║██╔══██╗██╔═██╗ ██╔══╝  ██║   ██║██╔══██╗██║   ██║╚════██║
+-- ██║  ██║██║  ██║██║  ██║██║  ██╗███████╗╚██████╔╝██║  ██║╚██████╔╝███████║
+-- ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+-- DarkForge-X SHADOW-CORE v3.3 | ORIGINAL CAMERA AIMBOT + ORIGINAL SPINBOT
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local aimlockEnabled = false
+local spinbotEnabled = false
+local wallhackEnabled = false
+local teamCheckEnabled = true
+local predictionFactor = 0.09
+local aimPart = "Head"
+local spinSpeed = 55
+
+local lockedTarget = nil
+local holdKey = Enum.KeyCode.ButtonL2
+local spinbotKey = Enum.KeyCode.R
+local teamSwitchKey = Enum.KeyCode.L
+local settingsKey = Enum.KeyCode.Minus
+
+local velocityCache = {}
+local settingsGui = nil
+local isDragging = false
+local dragStart, startPos = nil, nil
+local isSliderDragging = false
+local rebindingFor = nil
+
+local hiddenFolder = nil
+local storedParts = {}
+
+local function getScreenDistance(part)
+	if not part then return math.huge end
+	local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+	if not onScreen then return math.huge end
+	local mousePos = UserInputService:GetMouseLocation()
+	return (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+end
+
+local function findTargetNearCursor()
+	local bestPart, bestDist = nil, math.huge
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
+			local targetPart = plr.Character:FindFirstChild(aimPart) or plr.Character:FindFirstChild("HumanoidRootPart")
+			if targetPart then
+				local shouldTarget = not (teamCheckEnabled and LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team)
+				if shouldTarget then
+					local dist = getScreenDistance(targetPart)
+					if dist < bestDist and dist < 350 then
+						bestDist = dist
+						bestPart = targetPart
+						lockedTarget = plr
+					end
+				end
+			end
+		end
+	end
+	return bestPart
+end
+
+local function isTargetValid()
+	if not lockedTarget or not lockedTarget.Character then return false end
+	local hum = lockedTarget.Character:FindFirstChild("Humanoid")
+	return hum and hum.Health > 0
+end
+
+local function predictPosition(targetPart)
+	if not targetPart then return targetPart.Position end
+	local vel = targetPart.Velocity
+	if not velocityCache[targetPart] then velocityCache[targetPart] = vel end
+	velocityCache[targetPart] = velocityCache[targetPart]:Lerp(vel, 0.4)
+	return targetPart.Position + (velocityCache[targetPart] * predictionFactor)
+end
+
+-- ===================== MAIN LOOP =====================
+RunService.RenderStepped:Connect(function()
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChild("Humanoid")
+
+	-- ORIGINAL SPINBOT
+	if spinbotEnabled and root and hum then
+		local currentYaw = tick() * spinSpeed
+		root.CFrame = CFrame.new(root.Position) * CFrame.Angles(math.rad(-89), math.rad(currentYaw % 360), 0)
+		hum.AutoRotate = false
+	elseif hum then
+		hum.AutoRotate = true
+	end
+
+	-- ORIGINAL CAMERA AIMBOT (restored)
+	if not aimlockEnabled then
+		lockedTarget = nil
+		return
+	end
+	if not isTargetValid() then lockedTarget = nil end
+
+	local targetPart = lockedTarget and (lockedTarget.Character and (lockedTarget.Character:FindFirstChild(aimPart) or lockedTarget.Character:FindFirstChild("HumanoidRootPart")))
+		or (not lockedTarget and findTargetNearCursor())
+
+	if targetPart then
+		local predicted = predictPosition(targetPart)
+		Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, predicted)
+	end
+end)
+
+-- ===================== WALLHACK =====================
+local wallhackConnection = nil
+local function applyWallhack(enabled)
+	if enabled then
+		if not hiddenFolder then
+			hiddenFolder = Instance.new("Folder")
+			hiddenFolder.Name = "DarkForge_Hidden"
+			hiddenFolder.Parent = game:GetService("CoreGui")
+		end
+		storedParts = {}
+		for _, obj in ipairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") and not obj.Parent:FindFirstChildWhichIsA("Humanoid") and obj ~= workspace.Terrain then
+				local playerPos = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart and LocalPlayer.Character.PrimaryPart.Position
+				local isRelevant = playerPos and ((obj.Position.Y <= playerPos.Y + 8) or (obj.Position - playerPos).Magnitude < 25)
+				if not isRelevant then
+					storedParts[obj] = obj.Parent
+					obj.Parent = hiddenFolder
+				end
+			end
+		end
+		wallhackConnection = RunService.Heartbeat:Connect(function()
+			if not wallhackEnabled then return end
+			local playerPos = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart and LocalPlayer.Character.PrimaryPart.Position
+			if not playerPos then return end
+			for obj, originalParent in pairs(storedParts) do
+				if obj and obj.Parent == hiddenFolder then
+					local isRelevant = (obj.Position.Y <= playerPos.Y + 10) or (obj.Position - playerPos).Magnitude < 30
+					if isRelevant then obj.Parent = originalParent end
+				elseif obj and obj.Parent ~= hiddenFolder then
+					local isRelevant = (obj.Position.Y <= playerPos.Y + 10) or (obj.Position - playerPos).Magnitude < 30
+					if not isRelevant then
+						storedParts[obj] = obj.Parent
+						obj.Parent = hiddenFolder
+					end
+				end
+			end
+		end)
+	else
+		if wallhackConnection then wallhackConnection:Disconnect() wallhackConnection = nil end
+		for obj, originalParent in pairs(storedParts) do
+			if obj and originalParent and originalParent.Parent then obj.Parent = originalParent end
+		end
+		storedParts = {}
+		if hiddenFolder then hiddenFolder:Destroy() hiddenFolder = nil end
+	end
+end
+
+-- ===================== INPUT =====================
+UserInputService.InputBegan:Connect(function(input, gp)
+	if gp then return end
+
+	if rebindingFor then
+		if input.KeyCode ~= Enum.KeyCode.Unknown then
+			if rebindingFor == "hold" then holdKey = input.KeyCode
+			elseif rebindingFor == "spin" then spinbotKey = input.KeyCode
+			elseif rebindingFor == "team" then teamSwitchKey = input.KeyCode end
+			print("DarkForge-X | Rebound successful.")
+			rebindingFor = nil
+		end
+		return
+	end
+
+	if input.KeyCode == holdKey then
+		aimlockEnabled = true
+		print("DarkForge-X | CAMERA AIMBOT: ENGAGED")
+	elseif input.KeyCode == spinbotKey then
+		spinbotEnabled = not spinbotEnabled
+		print("DarkForge-X | SPINBOT: " .. (spinbotEnabled and "ON" or "OFF"))
+	elseif input.KeyCode == teamSwitchKey then
+		teamCheckEnabled = not teamCheckEnabled
+		print("DarkForge-X | MODE: " .. (teamCheckEnabled and "TEAM CHECK" or "FFA"))
+	elseif input.KeyCode == settingsKey then
+		if settingsGui and settingsGui.Parent then
+			local main = settingsGui:FindFirstChild("Main")
+			if main then TweenService:Create(main, TweenInfo.new(0.28, Enum.EasingStyle.Quint), {BackgroundTransparency = main.BackgroundTransparency == 0 and 1 or 0}):Play() end
+			settingsGui.Enabled = not settingsGui.Enabled
+		else
+			createSettingsUI()
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gp)
+	if gp then return end
+	if input.KeyCode == holdKey then
+		aimlockEnabled = false
+		lockedTarget = nil
+		print("DarkForge-X | CAMERA AIMBOT: RELEASED")
+	end
+end)
+
+-- ===================== SETTINGS UI =====================
+function createSettingsUI()
+	if settingsGui then settingsGui:Destroy() end
+	settingsGui = Instance.new("ScreenGui")
+	settingsGui.Name = "DarkForgeUI"
+	settingsGui.ResetOnSpawn = false
+	settingsGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "Main"
+	mainFrame.Size = UDim2.new(0, 380, 0, 620)
+	mainFrame.Position = UDim2.new(0.5, -190, 0.12, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+	mainFrame.BackgroundTransparency = 1
+	mainFrame.Parent = settingsGui
+	TweenService:Create(mainFrame, TweenInfo.new(0.35, Enum.EasingStyle.Quint), {BackgroundTransparency = 0}):Play()
+
+	local titleBar = Instance.new("Frame")
+	titleBar.Size = UDim2.new(1,0,0,50)
+	titleBar.BackgroundColor3 = Color3.fromRGB(18,18,38)
+	titleBar.Parent = mainFrame
+
+	local title = Instance.new("TextLabel")
+	title.Text = "DARKFORGE-X v3.3 | ORIGINAL CAMERA AIMBOT"
+	title.Size = UDim2.new(1,-110,1,0)
+	title.BackgroundTransparency = 1
+	title.TextColor3 = Color3.fromRGB(0,255,210)
+	title.Font = Enum.Font.Code
+	title.TextSize = 15
+	title.Parent = titleBar
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Text = "✕"
+	closeBtn.Size = UDim2.new(0,50,1,0)
+	closeBtn.Position = UDim2.new(1,-50,0,0)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(160,20,20)
+	closeBtn.TextColor3 = Color3.new(1,1,1)
+	closeBtn.Parent = titleBar
+	closeBtn.MouseButton1Click:Connect(function()
+		local main = settingsGui:FindFirstChild("Main")
+		if main then TweenService:Create(main, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play() end
+		task.delay(0.32, function() if settingsGui then settingsGui.Enabled = false end end)
+	end)
+
+	titleBar.InputBegan:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then isDragging = true; dragStart = inp.Position; startPos = mainFrame.Position end end)
+	UserInputService.InputChanged:Connect(function(inp) if isDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then local d = inp.Position - dragStart; mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y) end end)
+	UserInputService.InputEnded:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then isDragging = false end end)
+
+	local whLabel = Instance.new("TextLabel")
+	whLabel.Text = "Wallhack (True Delete): " .. (wallhackEnabled and "ACTIVE" or "OFF")
+	whLabel.Size = UDim2.new(0.9,0,0,35)
+	whLabel.Position = UDim2.new(0.05,0,0,65)
+	whLabel.BackgroundTransparency = 1
+	whLabel.TextColor3 = Color3.new(1,1,1)
+	whLabel.Font = Enum.Font.Code
+	whLabel.Parent = mainFrame
+
+	local whBtn = Instance.new("TextButton")
+	whBtn.Text = wallhackEnabled and "RESTORE WORLD" or "DELETE OBSTRUCTIONS"
+	whBtn.Size = UDim2.new(0.9,0,0,45)
+	whBtn.Position = UDim2.new(0.05,0,0,105)
+	whBtn.BackgroundColor3 = wallhackEnabled and Color3.fromRGB(200,30,30) or Color3.fromRGB(30,200,30)
+	whBtn.TextColor3 = Color3.new(1,1,1)
+	whBtn.Font = Enum.Font.Code
+	whBtn.Parent = mainFrame
+	whBtn.MouseButton1Click:Connect(function()
+		wallhackEnabled = not wallhackEnabled
+		applyWallhack(wallhackEnabled)
+		whLabel.Text = "Wallhack (True Delete): " .. (wallhackEnabled and "ACTIVE" or "OFF")
+		whBtn.Text = wallhackEnabled and "RESTORE WORLD" or "DELETE OBSTRUCTIONS"
+		whBtn.BackgroundColor3 = wallhackEnabled and Color3.fromRGB(200,30,30) or Color3.fromRGB(30,200,30)
+	end)
+
+	local predLabel = Instance.new("TextLabel")
+	predLabel.Text = "Prediction Strength: " .. string.format("%.2f", predictionFactor)
+	predLabel.Size = UDim2.new(1,-30,0,30)
+	predLabel.Position = UDim2.new(0,15,0,165)
+	predLabel.BackgroundTransparency = 1
+	predLabel.TextColor3 = Color3.new(1,1,1)
+	predLabel.Font = Enum.Font.Code
+	predLabel.Parent = mainFrame
+
+	local track = Instance.new("Frame")
+	track.Size = UDim2.new(0.9,0,0,14)
+	track.Position = UDim2.new(0.05,0,0,200)
+	track.BackgroundColor3 = Color3.fromRGB(30,30,50)
+	track.Parent = mainFrame
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(predictionFactor / 0.22,0,1,0)
+	fill.BackgroundColor3 = Color3.fromRGB(0,240,160)
+	fill.Parent = track
+
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.new(0,20,0,20)
+	knob.Position = UDim2.new(predictionFactor / 0.22,-10,-0.25,0)
+	knob.BackgroundColor3 = Color3.fromRGB(0,255,200)
+	knob.Parent = track
+
+	local function updatePrediction(xPos)
+		local rel = math.clamp((xPos - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		predictionFactor = rel * 0.22
+		fill.Size = UDim2.new(rel,0,1,0)
+		knob.Position = UDim2.new(rel,-10,-0.25,0)
+		predLabel.Text = "Prediction Strength: " .. string.format("%.2f", predictionFactor)
+	end
+
+	track.InputBegan:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then isSliderDragging = true; updatePrediction(inp.Position.X) end end)
+	UserInputService.InputChanged:Connect(function(inp) if isSliderDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then updatePrediction(inp.Position.X) end end)
+	UserInputService.InputEnded:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then isSliderDragging = false end end)
+
+	local function createRebindBtn(txt, ypos, mode)
+		local btn = Instance.new("TextButton")
+		btn.Text = txt
+		btn.Size = UDim2.new(0.85,0,0,40)
+		btn.Position = UDim2.new(0.075,0,0,ypos)
+		btn.BackgroundColor3 = Color3.fromRGB(25,25,45)
+		btn.TextColor3 = Color3.fromRGB(0,255,200)
+		btn.Font = Enum.Font.Code
+		btn.Parent = mainFrame
+		btn.MouseButton1Click:Connect(function()
+			rebindingFor = mode
+			print("DarkForge-X | Press new key for " .. mode .. "...")
+		end)
+	end
+
+	createRebindBtn("Rebind Aim HOLD Key (L2)", 250, "hold")
+	createRebindBtn("Rebind Spinbot Toggle (R)", 300, "spin")
+	createRebindBtn("Rebind Team/FFA", 350, "team")
+
+	local status = Instance.new("TextLabel")
+	status.Text = "v3.3 | Original Camera Aimbot + Original Spinbot"
+	status.Size = UDim2.new(1,-20,0,40)
+	status.Position = UDim2.new(0,10,1,-55)
+	status.BackgroundTransparency = 1
+	status.TextColor3 = Color3.fromRGB(80,255,140)
+	status.Font = Enum.Font.Code
+	status.Parent = mainFrame
+end
+
+print("DarkForge-X SHADOW-CORE v3.3 LOADED")
+print("Hold L2 = Original Camera Aimbot | R = Original Spinbot | '-' = Settings")
