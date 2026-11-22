@@ -1,0 +1,3127 @@
+--[[
+    Ω V0IDZ HUB Ω  •  v1.0
+    NPC-aware ESP, Roaring aura trail, surface-sampled Blindness, and Thermal Vision
+]]
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
+local TeleportService  = game:GetService("TeleportService")
+local Lighting         = game:GetService("Lighting")
+local player    = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local VERSION = "1.0"
+-- Ask a previous v1.33 runtime to disconnect its frame/event loops before starting.
+-- Older versions did not expose this signal; restarting the Roblox session clears those.
+local runtimeCleanupSignal = playerGui:FindFirstChild("DarkForgeRuntimeCleanup")
+if runtimeCleanupSignal and runtimeCleanupSignal:IsA("BindableEvent") then
+    runtimeCleanupSignal:Fire()
+end
+-- ====================== CLEANUP OLD ======================
+local function fullCleanup()
+    local old = playerGui:FindFirstChild("DarkForgeNaoyaUI")
+    if old then old:Destroy() end
+    local oldESP = playerGui:FindFirstChild("DarkForgeESPOverlay")
+    if oldESP then oldESP:Destroy() end
+    for _, oldEffect in ipairs(Lighting:GetDescendants()) do
+        if oldEffect.Name == "DarkForgeNightVisionColor" then oldEffect:Destroy() end
+    end
+    local oldBlindness = Lighting:FindFirstChild("DarkForgeBlindnessGrade")
+    if oldBlindness then oldBlindness:Destroy() end
+    local oldBlindFolder = workspace:FindFirstChild("DarkForgeBlindnessHighlights")
+    if oldBlindFolder then oldBlindFolder:Destroy() end
+    local oldThermalFolder = workspace:FindFirstChild("DarkForgeThermalVision")
+    if oldThermalFolder then oldThermalFolder:Destroy() end
+    local oldThermalGrade = Lighting:FindFirstChild("DarkForgeThermalGrade")
+    if oldThermalGrade then oldThermalGrade:Destroy() end
+    local oldThermalBloom = Lighting:FindFirstChild("DarkForgeThermalBloom")
+    if oldThermalBloom then oldThermalBloom:Destroy() end
+    local oldAnimeGrade = Lighting:FindFirstChild("DarkForgeAnimeGrade")
+    if oldAnimeGrade then oldAnimeGrade:Destroy() end
+    local oldWorldGrade = Lighting:FindFirstChild("DarkForgeAnimeWorldGrade")
+    if oldWorldGrade then oldWorldGrade:Destroy() end
+    local oldWorldBloom = Lighting:FindFirstChild("DarkForgeAnimeWorldBloom")
+    if oldWorldBloom then oldWorldBloom:Destroy() end
+    -- Restore only nearby parts from a previous Anime World session. The old effect
+    -- only stylized parts within 260 studs, so a bounded spatial query is sufficient.
+    local oldRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if oldRoot then
+        local restoreParams = OverlapParams.new()
+        restoreParams.FilterType = Enum.RaycastFilterType.Exclude
+        restoreParams.FilterDescendantsInstances = {player.Character}
+        restoreParams.MaxParts = 450
+        for _, part in ipairs(workspace:GetPartBoundsInRadius(oldRoot.Position, 265, restoreParams)) do
+            local originalColor = part:GetAttribute("DarkForgeAnimeOriginalColor")
+            local originalMaterial = part:GetAttribute("DarkForgeAnimeOriginalMaterial")
+            local originalReflectance = part:GetAttribute("DarkForgeAnimeOriginalReflectance")
+            if originalColor then part.Color = originalColor end
+            if originalMaterial and Enum.Material[originalMaterial] then part.Material = Enum.Material[originalMaterial] end
+            if originalReflectance ~= nil then part.Reflectance = originalReflectance end
+            if originalColor or originalMaterial or originalReflectance ~= nil then
+                part:SetAttribute("DarkForgeAnimeOriginalColor", nil)
+                part:SetAttribute("DarkForgeAnimeOriginalMaterial", nil)
+                part:SetAttribute("DarkForgeAnimeOriginalReflectance", nil)
+            end
+        end
+    end
+    local oldWorldInk = workspace:FindFirstChild("DarkForge_AnimeWorldInk")
+    if oldWorldInk then oldWorldInk:Destroy() end
+    local oldRoaring = workspace:FindFirstChild("DarkForge_RoaringAfterimages")
+    if oldRoaring then oldRoaring:Destroy() end
+    local oldFlightStreaks = workspace:FindFirstChild("DarkForge_WorldFlightStreaks")
+    if oldFlightStreaks then oldFlightStreaks:Destroy() end
+    local character = player.Character
+    if character then
+        local descendants = character:GetDescendants()
+        for _, obj in ipairs(descendants) do
+            if obj:IsA("ObjectValue") and obj.Value then
+                pcall(function() obj.Value:Destroy() end)
+            end
+        end
+        for _, obj in ipairs(descendants) do
+            if obj.Parent and (obj.Name == "DarkForge_FlightFX" or obj.Name == "DarkForge_rain" or obj.Name == "DarkForge_anime" or obj.Name == "DarkForge_rage" or obj.Name == "DarkForge_roaring" or obj.Name == "DarkForge_menace" or obj.Name == "DarkForgeRainLoop") then
+                obj:Destroy()
+            end
+        end
+    end
+    for _, obj in ipairs(playerGui:GetChildren()) do
+        if obj.Name:match("^MenacingBillboard") then obj:Destroy() end
+    end
+end
+fullCleanup()
+-- CONFIG
+local ACCENT = Color3.fromRGB(0, 180, 255)
+local BG     = Color3.fromRGB(16, 16, 20)
+local BG2    = Color3.fromRGB(26, 26, 32)
+local BG3    = Color3.fromRGB(38, 38, 46)
+local TEXT   = Color3.fromRGB(235, 235, 240)
+local MUTED  = Color3.fromRGB(140, 140, 155)
+local GREEN  = Color3.fromRGB(80, 220, 120)
+local YELLOW = Color3.fromRGB(240, 200, 60)
+local REDC   = Color3.fromRGB(240, 80, 80)
+local SOUND_GEPPO_JUMP = "rbxassetid://95557305310775"
+local SOUND_NAOYA_ON   = "rbxassetid://120901233293120"
+local SOUND_NAOYA_OFF  = "rbxassetid://138078249517696"
+local SOUND_NIGHTVISION_ON = "rbxassetid://128834004361147"
+local SOUND_NIGHTVISION_OFF = "rbxassetid://115010854046062"
+local SOUND_NORMAL     = "rbxassetid://135244211779631"
+local SOUND_INTRO      = "rbxassetid://123462196064122"
+local SOUND_SPRINT     = "rbxassetid://83211426606907"
+local GEPPO_ANIM_ID    = "rbxassetid://80744488373239"
+local FLIGHT_IDLE_ANIM    = "rbxassetid://91428863336534"
+local FLIGHT_TOGGLE_ANIM  = "rbxassetid://91496614952968"
+local FLIGHT_FORWARD_ANIM = "rbxassetid://107554693613496"
+local FLIGHT_BACK_ANIM    = "rbxassetid://86797968614255"
+local UI_WIDTH  = 500
+local UI_HEIGHT = 580
+local TITLE_H   = 36
+local COLLAPSED_H = 36
+-- STATE
+local currentAccent = ACCENT
+local collapsed = false
+local naoyaMode = false
+local holdingActivate = false
+local naoyaModeType = "infront"
+local geppoEnabled = false
+local geppoInfinite = false
+local geppoMaxJumps = 3
+local geppoCurrent = 0
+local flightEnabled = false
+local flightBV = nil
+local flightBG = nil
+local lastGeppoAt = 0
+local GEPPO_COOLDOWN = 0.25
+local flightTracks = {}
+local currentFlightAnim = nil
+local flightSpeed = 0
+local targetFlightSpeed = 0
+local originalFOV = 70
+local targetFOV = 70
+local sprinting = false
+local flightBoost = false
+local flightEffectsGui, flightSpeedLines, flightNotice = nil, {}, nil
+local flightSpeedLineFolder = nil
+local originalAutoRotate = true
+local speedEnabled = false
+local tpWalkEnabled = false
+local tpWalkPower = 1.2
+local highlightESP = false
+local tracersESP = false
+local boxESP = false
+local doorESP = false
+local statESP, nightVisionESP = false, false
+local thermalVisionESP = false
+local thermalFolder, thermalGrade, thermalBloom = nil, nil, nil
+local thermalHighlights = {}
+local thermalLastScan = 0
+local nightVisionPrevious, espGui, nightVisionTint, nightVisionHud = nil, nil, nil, nil
+local espObjects = {}
+local nightVisionRange = 350
+local boxESPRange = 350
+local boxJitterCache = {}
+local flashstepEnabled = false
+local flashstepRange = 100
+local flashstepClone = nil
+local flashstepOrigin = nil
+local flashstepOriginal = nil
+local flashstepCameraSubject = nil
+local flashstepMoveSpeed = 58
+local setFlashstep
+local nextStaticUpdate = 0
+local whitelistPlayers = {}
+local blacklistPlayers = {}
+local listFilterEnabled = false
+local blindnessEnabled = false
+local blindnessGrade = nil
+local blindnessWorldFolder = nil
+local blindnessWorldHighlights = {} -- compatibility cleanup table
+local blindnessSurfaceMarkers = {}
+local blindnessRayParams = nil
+local blindnessPlayerHighlights = {}
+local blindnessLocalHighlight = nil
+local blindnessOriginalPlayerColors = {}
+local blindnessLastScan = 0
+local blindnessRange = 220 -- studs; expanded local visibility radius
+local blindnessColoredCharacter = nil
+
+-- Local-character cosmetic effects (client-only)
+local playerEffectStates = {rain=false, anime=false, rage=false, roaring=false}
+local worldAnimeEnabled = false
+local worldAnimeObjects = {}
+local worldAnimeOriginals = {}
+local worldAnimeFolder = nil
+local worldAnimeConnection = nil
+local worldAnimeScanClock = 0
+local playerEffectFolders = {}
+local playerEffectConnections = {}
+local rainSound = nil
+local rainParts = {}
+local animeOriginals = {}
+local whitelistColor = Color3.fromRGB(255, 50, 50)
+local blacklistColor = Color3.fromRGB(50, 255, 80)
+local doorColor = Color3.fromRGB(255, 140, 0)
+local wlFillTrans = 0.45
+local wlOutlineTrans = 0
+local blFillTrans = 0.45
+local blOutlineTrans = 0
+local doorFillTrans = 0.4
+local doorOutlineTrans = 0
+local allAccentObjects = {}
+local activeSwitchTracks = {}
+local playerHighlights = {}
+-- NPC ESP state (must be initialized before the RenderStepped ESP loop).
+local npcTargetModels = {}
+local npcLastScan = 0
+local doorHighlights = {}
+local tracerLines = {}
+local boxLines = {}
+local lastDoorScan = 0
+local drag = {active = false, start = nil, origin = nil}
+local keybinds = {}
+local waitingForBind = nil
+local bindConnection = nil
+-- Connections we need to clean up
+local connections = {}
+local function addConn(conn)
+    table.insert(connections, conn)
+    return conn
+end
+if not runtimeCleanupSignal or not runtimeCleanupSignal.Parent then
+    runtimeCleanupSignal = Instance.new("BindableEvent")
+    runtimeCleanupSignal.Name = "DarkForgeRuntimeCleanup"
+    runtimeCleanupSignal.Parent = playerGui
+end
+local runtimeCleanupConnection
+runtimeCleanupConnection = runtimeCleanupSignal.Event:Connect(function()
+    for _, conn in ipairs(connections) do
+        if conn and conn.Connected then conn:Disconnect() end
+    end
+    for _, conn in pairs(playerEffectConnections) do
+        if conn and conn.Connected then conn:Disconnect() end
+    end
+    if worldAnimeConnection and worldAnimeConnection.Connected then
+        worldAnimeConnection:Disconnect()
+    end
+    if runtimeCleanupConnection then runtimeCleanupConnection:Disconnect() end
+end)
+-- HELPERS
+local function playSound(id, pitch)
+    local s = Instance.new("Sound")
+    s.SoundId = id
+    s.Volume = 0.75
+    s.PlaybackSpeed = pitch or 1
+    s.Parent = playerGui
+    s:Play()
+    game.Debris:AddItem(s, 4)
+end
+local function corner(obj, r)
+    Instance.new("UICorner", obj).CornerRadius = UDim.new(0, r or 6)
+end
+local function create(class, props, parent)
+    local obj = Instance.new(class)
+    for k, v in pairs(props) do obj[k] = v end
+    if parent then obj.Parent = parent end
+    return obj
+end
+local function registerAccent(obj, prop)
+    table.insert(allAccentObjects, {obj, prop or "BackgroundColor3"})
+end
+local function applyAccent(col)
+    currentAccent = col
+    for _, e in ipairs(allAccentObjects) do
+        if e[1] and e[1].Parent then
+            pcall(function() e[1][e[2]] = col end)
+        end
+    end
+    for track in pairs(activeSwitchTracks) do
+        if track and track.Parent then
+            track.BackgroundColor3 = col
+        end
+    end
+end
+local function clearDrawings(tbl)
+    for _, obj in pairs(tbl) do
+        if typeof(obj) == "Instance" then pcall(function() obj:Destroy() end)
+        elseif type(obj) == "table" then
+            for _, child in pairs(obj) do if typeof(child) == "Instance" then pcall(function() child:Destroy() end) end end
+        end
+    end
+    table.clear(tbl)
+end
+local function removePlayerESP(p)
+    local data = espObjects[p]
+    boxJitterCache[p] = nil
+    if data then for _, obj in pairs(data) do if typeof(obj) == "Instance" then pcall(function() obj:Destroy() end) end end espObjects[p] = nil end
+    local h = playerHighlights[p]
+    if h then h:Destroy() playerHighlights[p] = nil end
+end
+local function makeESPObject(p)
+    if not espGui then return nil end
+    local targetId, targetName
+    if p:IsA("Player") then
+        targetId, targetName = tostring(p.UserId), p.DisplayName
+    else
+        targetId, targetName = tostring(p.Name), p.Name
+    end
+    targetId = targetId:gsub("[^%w_]", "_")
+    local box = create("Frame", {Name="TargetBox_"..targetId, BackgroundTransparency=1, BorderSizePixel=0, Visible=false, ZIndex=5}, espGui)
+    local stroke = create("UIStroke", {Color=Color3.new(1,1,1), Thickness=1.7}, box)
+    local name = create("TextLabel", {Name="TargetName", AnchorPoint=Vector2.new(.5,1), Position=UDim2.new(.5,0,0,-5), Size=UDim2.new(1,70,0,18), BackgroundTransparency=1, Text=targetName, TextColor3=TEXT, TextStrokeTransparency=.25, Font=Enum.Font.GothamBold, TextSize=12, Visible=false, ZIndex=7}, box)
+    local hpBack = create("Frame", {Name="HealthBack", Position=UDim2.new(0,-7,0,0), Size=UDim2.new(0,4,1,0), BackgroundColor3=Color3.fromRGB(18,35,22), BorderSizePixel=0, Visible=false, ZIndex=6}, box)
+    local hpFill = create("Frame", {Name="HealthFill", AnchorPoint=Vector2.new(0,1), Position=UDim2.new(0,0,1,0), Size=UDim2.new(1,0,1,0), BackgroundColor3=Color3.fromRGB(90,255,130), BorderSizePixel=0, ZIndex=7}, hpBack)
+    local stats = create("TextLabel", {Name="Stats", AnchorPoint=Vector2.new(.5,0), Position=UDim2.new(.5,0,1,5), Size=UDim2.new(1,80,0,18), BackgroundTransparency=1, TextColor3=Color3.fromRGB(190,255,200), TextStrokeTransparency=.3, Font=Enum.Font.GothamSemibold, TextSize=11, Visible=false, ZIndex=7}, box)
+    local tracer = create("Frame", {Name="Tracer", AnchorPoint=Vector2.new(0,.5), BackgroundColor3=whitelistColor, BorderSizePixel=0, Visible=false, ZIndex=3}, espGui)
+    return {box=box, stroke=stroke, name=name, hpBack=hpBack, hpFill=hpFill, stats=stats, tracer=tracer}
+end
+local function playerListContains(list, targetPlayer)
+    if typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then return false end
+    local username = string.lower(targetPlayer.Name)
+    local display = string.lower(targetPlayer.DisplayName)
+    return list[username] == true or list[display] == true
+end
+local function isBlacklisted(targetPlayer)
+    return playerListContains(blacklistPlayers, targetPlayer)
+end
+local function getNPCModelFromPart(part, excludedCharacter)
+    local model = part and part:FindFirstAncestorOfClass("Model")
+    while model and model ~= excludedCharacter do
+        local hum = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true)
+        if hum then return model, hum end
+        model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model") or nil
+    end
+    return nil, nil
+end
+
+local function getNPCRoot(model)
+    if not model then return nil end
+    return model:FindFirstChild("HumanoidRootPart", true)
+        or model.PrimaryPart
+        or model:FindFirstChild("UpperTorso", true)
+        or model:FindFirstChild("Torso", true)
+        or model:FindFirstChild("LowerTorso", true)
+        or model:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function getESPColor(targetPlayer)
+    if typeof(targetPlayer) == "Instance" and targetPlayer:IsA("Model") then
+        return Color3.fromRGB(70, 255, 110)
+    end
+    if playerListContains(whitelistPlayers, targetPlayer) then return whitelistColor end
+    if isBlacklisted(targetPlayer) then return blacklistColor end
+    return whitelistColor
+end
+local function setPlayerListEntry(list, name, enabled)
+    local key = string.lower((name or ""):match("^%s*(.-)%s*$") or "")
+    if key == "" then return false end
+    if enabled then list[key] = true else list[key] = nil end
+    return true
+end
+
+local function ensureESPGui()
+    if espGui and espGui.Parent then return end
+    espGui = create("ScreenGui", {Name="DarkForgeESPOverlay", ResetOnSpawn=false, IgnoreGuiInset=true, DisplayOrder=30, ZIndexBehavior=Enum.ZIndexBehavior.Sibling}, playerGui)
+    nightVisionTint = create("Frame", {Name="NightVisionTint", Size=UDim2.fromScale(1,1), BackgroundColor3=Color3.fromRGB(35,125,65), BackgroundTransparency=.86, BorderSizePixel=0, Visible=false, ZIndex=1}, espGui)
+    nightVisionHud = create("Frame", {Name="NightVisionHUD", Position=UDim2.new(0,22,0,22), Size=UDim2.fromOffset(245,104), BackgroundColor3=Color3.fromRGB(5,24,13), BackgroundTransparency=.18, BorderSizePixel=0, Visible=false, ZIndex=10}, espGui)
+    corner(nightVisionHud,8)
+    create("UIStroke", {Color=Color3.fromRGB(90,255,145), Transparency=.2, Thickness=1}, nightVisionHud)
+    create("TextLabel", {Position=UDim2.fromOffset(12,7), Size=UDim2.new(1,-24,0,20), BackgroundTransparency=1, Text="NIGHTVISION // ACTIVE", TextColor3=Color3.fromRGB(130,255,170), Font=Enum.Font.GothamBlack, TextSize=13, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=11}, nightVisionHud)
+    create("Frame", {Position=UDim2.fromOffset(12,32), Size=UDim2.new(1,-24,0,1), BackgroundColor3=Color3.fromRGB(65,170,100), BorderSizePixel=0, ZIndex=11}, nightVisionHud)
+    create("TextLabel", {Name="LocalHealthText", Position=UDim2.fromOffset(12,40), Size=UDim2.new(1,-24,0,16), BackgroundTransparency=1, Text="VITALS -- / --", TextColor3=Color3.fromRGB(205,255,215), Font=Enum.Font.Code, TextSize=11, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=11}, nightVisionHud)
+    local hpBack=create("Frame", {Name="LocalHealthBack", Position=UDim2.fromOffset(12,62), Size=UDim2.new(1,-24,0,8), BackgroundColor3=Color3.fromRGB(20,55,32), BorderSizePixel=0, ZIndex=11}, nightVisionHud)
+    corner(hpBack,4)
+    local hpFill=create("Frame", {Name="LocalHealthFill", Size=UDim2.fromScale(1,1), BackgroundColor3=Color3.fromRGB(100,255,145), BorderSizePixel=0, ZIndex=12}, hpBack)
+    corner(hpFill,4)
+    create("TextLabel", {Name="NearbyText", Position=UDim2.fromOffset(12,77), Size=UDim2.new(1,-24,0,17), BackgroundTransparency=1, Text="TRACKED: 0 // RANGE: 350M", TextColor3=Color3.fromRGB(125,220,155), Font=Enum.Font.Code, TextSize=10, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=11}, nightVisionHud)
+    local reticle=create("Frame", {Name="NVReticle", AnchorPoint=Vector2.new(.5,.5), Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(2,18), BackgroundColor3=Color3.fromRGB(150,255,180), BorderSizePixel=0, Visible=false, ZIndex=8}, espGui)
+    create("Frame", {AnchorPoint=Vector2.new(.5,.5), Position=UDim2.fromScale(.5,.5), Size=UDim2.fromOffset(18,2), BackgroundColor3=Color3.fromRGB(150,255,180), BorderSizePixel=0}, reticle)
+    local staticLayer = create("Frame", {Name="NVStaticLayer", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Visible=false, ZIndex=2}, espGui)
+    for i = 1, 72 do
+        local px = create("Frame", {Name="StaticPixel", Position=UDim2.fromScale(math.random(), math.random()), Size=UDim2.fromOffset(math.random(1,3), math.random(1,2)), BackgroundColor3=Color3.fromRGB(100,255,145), BackgroundTransparency=0.25, BorderSizePixel=0, ZIndex=2}, staticLayer)
+        px:SetAttribute("StaticSeed", math.random())
+    end
+    local cornerLayer = create("Frame", {Name="NVScreenCorners", Size=UDim2.fromScale(1,1), BackgroundTransparency=1, Visible=false, ZIndex=9}, espGui)
+    local function cornerMark(xScale, yScale, xSign, ySign)
+        local h = create("Frame", {AnchorPoint=Vector2.new(xSign < 0 and 1 or 0, ySign < 0 and 1 or 0), Position=UDim2.fromScale(xScale,yScale), Size=UDim2.fromOffset(42,2), BackgroundColor3=Color3.fromRGB(115,255,155), BackgroundTransparency=0.12, BorderSizePixel=0, ZIndex=9}, cornerLayer)
+        local v = create("Frame", {AnchorPoint=Vector2.new(xSign < 0 and 1 or 0, ySign < 0 and 1 or 0), Position=UDim2.fromScale(xScale,yScale), Size=UDim2.fromOffset(2,42), BackgroundColor3=Color3.fromRGB(115,255,155), BackgroundTransparency=0.12, BorderSizePixel=0, ZIndex=9}, cornerLayer)
+    end
+    cornerMark(0.025,0.04,1,1); cornerMark(0.975,0.04,-1,1)
+    cornerMark(0.025,0.96,1,-1); cornerMark(0.975,0.96,-1,-1)
+end
+
+-- FLIGHT VISUALS (client-only)
+local function ensureFlightVisuals()
+    if flightEffectsGui and flightEffectsGui.Parent then return end
+    flightEffectsGui = create("ScreenGui", {
+        Name = "DarkForgeFlightEffects", ResetOnSpawn = false,
+        IgnoreGuiInset = true, DisplayOrder = 45,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    }, playerGui)
+    -- Flight streaks are intentionally NOT ScreenGui elements. They are
+    -- world-space Trail objects created around the character while moving.
+end
+
+local function createFlightStreaks()
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if #flightSpeedLines > 0 then
+        local alive = false
+        for _, data in ipairs(flightSpeedLines) do
+            if data.part and data.part.Parent then alive = true break end
+        end
+        if alive then return end
+    end
+    flightSpeedLines = {}
+    if flightSpeedLineFolder then flightSpeedLineFolder:Destroy() end
+    flightSpeedLineFolder = Instance.new("Folder")
+    flightSpeedLineFolder.Name = "DarkForge_WorldFlightStreaks"
+    flightSpeedLineFolder.Parent = workspace
+
+    -- Long, clean world-space trails arranged around the player, moving from
+    -- the forward field of view past the camera. These are not screen GUI lines.
+    for i = 1, 24 do
+        local part = Instance.new("Part")
+        part.Name = "FlightStreakAnchor"
+        part.Size = Vector3.new(0.08, 0.08, 0.08)
+        part.Transparency = 1
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.CastShadow = false
+        part.Parent = flightSpeedLineFolder
+        local a0 = Instance.new("Attachment")
+        a0.Position = Vector3.new(0, 0, 0)
+        a0.Parent = part
+        local a1 = Instance.new("Attachment")
+        local length = math.random(45, 100) / 10
+        a1.Position = Vector3.new(0, 0, -length)
+        a1.Parent = part
+        local trail = Instance.new("Trail")
+        trail.Name = "FlightSpeedTrail"
+        trail.Attachment0 = a0
+        trail.Attachment1 = a1
+        trail.FaceCamera = true
+        trail.LightEmission = 0.9
+        trail.LightInfluence = 0
+        trail.Lifetime = 0.16
+        trail.MinLength = 0.08
+        trail.WidthScale = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.075), NumberSequenceKeypoint.new(0.2, 0.045), NumberSequenceKeypoint.new(1, 0)})
+        trail.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.08), NumberSequenceKeypoint.new(1, 1)})
+        trail.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(255,255,255)), ColorSequenceKeypoint.new(0.35, Color3.fromRGB(165,230,255)), ColorSequenceKeypoint.new(1, Color3.fromRGB(65,135,255))})
+        trail.Enabled = false
+        trail.Parent = part
+        table.insert(flightSpeedLines, {
+            part=part, trail=trail,
+            offset=Vector2.new(math.random(-180,180)/10, math.random(-110,110)/10),
+            phase=math.random(), rate=math.random(75,125)/100,
+            depth=math.random(20,48), length=length
+        })
+    end
+end
+
+local function showFlightNotification()
+    ensureFlightVisuals()
+    if flightNotice then flightNotice:Destroy() end
+    local card = create("Frame", {
+        Name = "FlightControlsNotice", AnchorPoint = Vector2.new(0,0),
+        Position = UDim2.new(0,-330,0,92), Size = UDim2.fromOffset(300,116),
+        BackgroundColor3 = Color3.fromRGB(12,18,27), BackgroundTransparency = .08,
+        BorderSizePixel = 0, ZIndex = 20
+    }, flightEffectsGui)
+    flightNotice = card
+    corner(card,10)
+    create("UIStroke", {Color=ACCENT, Transparency=.15, Thickness=1.5}, card)
+    create("TextLabel", {
+        Position=UDim2.fromOffset(14,9), Size=UDim2.new(1,-28,0,22),
+        BackgroundTransparency=1, Text="FLIGHT SYSTEM // ONLINE",
+        TextColor3=Color3.fromRGB(150,225,255), Font=Enum.Font.GothamBlack,
+        TextSize=13, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=21
+    }, card)
+    create("TextLabel", {
+        Position=UDim2.fromOffset(14,36), Size=UDim2.new(1,-28,0,68),
+        BackgroundTransparency=1,
+        Text="WASD / LEFT STICK  •  MOVE\nSPACE / CTRL  •  UP / DOWN\nJ / CONTROLLER B  •  BOOST",
+        TextColor3=TEXT, Font=Enum.Font.Code, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+        ZIndex=21
+    }, card)
+    TweenService:Create(card, TweenInfo.new(.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+        Position=UDim2.new(0,18,0,92)
+    }):Play()
+    task.delay(5.5, function()
+        if card and card.Parent then
+            local tween=TweenService:Create(card,TweenInfo.new(.35,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{
+                Position=UDim2.new(0,-330,0,92)
+            })
+            tween:Play(); tween.Completed:Wait()
+            if card.Parent then card:Destroy() end
+            if flightNotice==card then flightNotice=nil end
+        end
+    end)
+end
+
+local function updateFlightSpeedLines(isForward, dt)
+    local show = flightEnabled and isForward
+    if not show then
+        for _, data in ipairs(flightSpeedLines) do
+            if data.trail then data.trail.Enabled = false end
+        end
+        return
+    end
+    createFlightStreaks()
+    local camera = workspace.CurrentCamera
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not camera or not root then return end
+    dt = math.min(dt or 1/60, 1/20)
+    local look, right, up = camera.CFrame.LookVector, camera.CFrame.RightVector, camera.CFrame.UpVector
+    local multiplier = flightBoost and 1.9 or 1
+    local travel = flightBoost and 125 or 92
+    for _, data in ipairs(flightSpeedLines) do
+        data.phase = (data.phase + dt * data.rate * multiplier) % 1
+        local depth = data.depth - data.phase * travel
+        local pos = root.Position + look * depth + right * data.offset.X + up * data.offset.Y
+        data.part.CFrame = CFrame.lookAt(pos, pos + look)
+        data.trail.Enabled = true
+        data.trail.Lifetime = flightBoost and 0.22 or 0.16
+    end
+end
+
+local function clearPlayerEffect(name)
+    local conn = playerEffectConnections[name]
+    if conn then conn:Disconnect(); playerEffectConnections[name] = nil end
+    local folder = playerEffectFolders[name]
+    if folder then
+        for _, descendant in ipairs(folder:GetDescendants()) do
+            if descendant:IsA("ObjectValue") and descendant.Value then
+                descendant.Value:Destroy()
+            end
+        end
+        folder:Destroy()
+        playerEffectFolders[name] = nil
+    end
+    if name == "anime" then
+        for part, original in pairs(animeOriginals) do
+            if part and part.Parent then
+                part.Color = original.color
+                part.Material = original.material
+                part.Reflectance = original.reflectance
+            end
+        end
+        animeOriginals = {}
+    elseif name == "rain" then
+        rainParts = {}
+        if rainSound then rainSound:Stop(); rainSound:Destroy(); rainSound = nil end
+    end
+end
+
+local function makeEffectFolder(name, character)
+    local folder = Instance.new("Folder")
+    folder.Name = "DarkForge_" .. name
+    folder.Parent = character
+    playerEffectFolders[name] = folder
+    return folder
+end
+
+local function applyPlayerEffect(name)
+    clearPlayerEffect(name)
+    if not playerEffectStates[name] then return end
+    local character = player.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local head = character:FindFirstChild("Head")
+    if not root then return end
+    local folder = makeEffectFolder(name, character)
+
+    if name == "rain" then
+        -- Dense, straight-down rain with a much higher fall velocity.
+        for i = 1, 110 do
+            local streak = Instance.new("Part")
+            streak.Name = "RainStreak"
+            streak.Anchored = true
+            streak.CanCollide = false
+            streak.CanTouch = false
+            streak.CanQuery = false
+            streak.CastShadow = false
+            streak.Material = Enum.Material.Neon
+            streak.Color = (i % 5 == 0) and Color3.fromRGB(225,245,255) or Color3.fromRGB(100,165,255)
+            streak.Transparency = math.random(8, 26) / 100
+            streak.Size = Vector3.new(0.025, math.random(95,175) / 100, 0.025)
+            streak.Parent = folder
+            table.insert(rainParts, {
+                part=streak,
+                offset=Vector3.new(math.random(-180,180)/10, math.random(0,180)/10, math.random(-180,180)/10),
+                fallSpeed=math.random(125,205)
+            })
+        end
+        rainSound = Instance.new("Sound")
+        rainSound.Name = "DarkForgeRainLoop"
+        rainSound.SoundId = "rbxassetid://1274987416"
+        rainSound.Looped = true
+        rainSound.Volume = 0.65
+        rainSound.Parent = root
+        rainSound:Play()
+        local rainAttachment = Instance.new("Attachment")
+        rainAttachment.Name = "RainMistAttachment"
+        rainAttachment.Position = Vector3.new(0, -1.1, 0)
+        rainAttachment.Parent = root
+        local rainRef = Instance.new("ObjectValue")
+        rainRef.Name = "RainMistCleanupRef"
+        rainRef.Value = rainAttachment
+        rainRef.Parent = folder
+        local mist = Instance.new("ParticleEmitter")
+        mist.Name = "RainAtmosphereMist"
+        mist.Texture = "rbxasset://textures/particles/smoke_main.dds"
+        mist.Rate = 18
+        mist.Lifetime = NumberRange.new(0.45, 0.85)
+        mist.Speed = NumberRange.new(1.2, 3.4)
+        mist.SpreadAngle = Vector2.new(180, 180)
+        mist.Color = ColorSequence.new(Color3.fromRGB(125,185,255))
+        mist.LightEmission = 0.2
+        mist.Size = NumberSequence.new({NumberSequenceKeypoint.new(0,0.65), NumberSequenceKeypoint.new(1,1.7)})
+        mist.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0,0.78), NumberSequenceKeypoint.new(1,1)})
+        mist.Parent = rainAttachment
+        playerEffectConnections.rain = RunService.Heartbeat:Connect(function(dt)
+            if not playerEffectStates.rain or not root.Parent then return end
+            for _, data in ipairs(rainParts) do
+                local part = data.part
+                if part and part.Parent then
+                    data.offset -= Vector3.new(0, data.fallSpeed * dt, 0)
+                    if data.offset.Y < -10 then
+                        data.offset = Vector3.new(math.random(-180,180)/10, math.random(95,180)/10, math.random(-180,180)/10)
+                    end
+                    part.CFrame = CFrame.new(root.Position + data.offset) -- perfectly vertical; no tilt
+                end
+            end
+        end)
+
+    elseif name == "anime" then
+        -- Character-only illustrated cel treatment. Roblox LocalScripts cannot
+        -- install a custom GPU shader, so this uses stepped colors + ink contours.
+        local function posterize(color)
+            local luminance = color.R * 0.2126 + color.G * 0.7152 + color.B * 0.0722
+            local band = luminance < 0.22 and 0.48 or (luminance < 0.48 and 0.72 or (luminance < 0.76 and 0.94 or 1.12))
+            return Color3.new(
+                math.clamp(math.floor(color.R * band * 4 + 0.5) / 4, 0, 1),
+                math.clamp(math.floor(color.G * band * 4 + 0.5) / 4, 0, 1),
+                math.clamp(math.floor(color.B * band * 4 + 0.5) / 4, 0, 1)
+            )
+        end
+        local characterInk = Instance.new("Highlight")
+        characterInk.Name = "AnimeCharacterInkSilhouette"
+        characterInk.Adornee = character
+        characterInk.DepthMode = Enum.HighlightDepthMode.Occluded
+        characterInk.FillTransparency = 1
+        characterInk.OutlineColor = Color3.fromRGB(12, 10, 16)
+        characterInk.OutlineTransparency = 0
+        characterInk.Parent = folder
+        for _, descendant in ipairs(character:GetDescendants()) do
+            if descendant:IsA("BasePart") and descendant.Name ~= "HumanoidRootPart" then
+                local original = descendant.Color
+                animeOriginals[descendant] = {color=original, material=descendant.Material, reflectance=descendant.Reflectance}
+                descendant.Material = Enum.Material.SmoothPlastic
+                descendant.Reflectance = 0
+                local celColor = posterize(original)
+                descendant.Color = celColor
+                local ink = Instance.new("Highlight")
+                ink.Name = "AnimeCelShade"
+                ink.Adornee = descendant
+                ink.DepthMode = Enum.HighlightDepthMode.Occluded
+                ink.FillColor = celColor:Lerp(Color3.fromRGB(12, 10, 16), 0.22)
+                ink.FillTransparency = 0.38
+                ink.OutlineColor = Color3.fromRGB(12, 10, 16)
+                ink.OutlineTransparency = 0
+                ink.Parent = folder
+            end
+        end
+    elseif name == "rage" then
+        if not head then folder:Destroy(); playerEffectFolders[name]=nil; return end
+        local rageLights = {}
+        local rageOutline = Instance.new("Highlight")
+        rageOutline.Name = "RageAuraOutline"
+        rageOutline.Adornee = character
+        rageOutline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        rageOutline.FillColor = Color3.fromRGB(115,0,8)
+        rageOutline.FillTransparency = 0.88
+        rageOutline.OutlineColor = Color3.fromRGB(255,25,35)
+        rageOutline.OutlineTransparency = 0.04
+        rageOutline.Parent = folder
+        local rageAttachment = Instance.new("Attachment")
+        rageAttachment.Name = "RageEmberAttachment"
+        rageAttachment.Parent = root
+        local rageRef = Instance.new("ObjectValue")
+        rageRef.Name = "RageEmberCleanupRef"
+        rageRef.Value = rageAttachment
+        rageRef.Parent = folder
+        local embers = Instance.new("ParticleEmitter")
+        embers.Name = "RageEmbers"
+        embers.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        embers.Rate = 24
+        embers.Lifetime = NumberRange.new(0.18,0.48)
+        embers.Speed = NumberRange.new(1.5,5)
+        embers.SpreadAngle = Vector2.new(180,180)
+        embers.Color = ColorSequence.new(Color3.fromRGB(255,245,230), Color3.fromRGB(255,0,12))
+        embers.LightEmission = 1
+        embers.Size = NumberSequence.new({NumberSequenceKeypoint.new(0,0.16), NumberSequenceKeypoint.new(0.35,0.09), NumberSequenceKeypoint.new(1,0)})
+        embers.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0,0.05), NumberSequenceKeypoint.new(1,1)})
+        embers.Parent = rageAttachment
+        -- Sharp manga-style eye flares: a bright four-point star with a red
+        -- outer glow. No plates, bars, or solid shapes cover the eyes.
+        local flareBeams = {}
+        local flareLights = {}
+        local function makeRay(origin, endpoint, rayName, isRing)
+            local a0 = Instance.new("Attachment")
+            a0.Name = "RageFlareA0"
+            a0.Position = origin
+            a0.Parent = head
+            local a1 = Instance.new("Attachment")
+            a1.Name = "RageFlareA1"
+            a1.Position = endpoint
+            a1.Parent = head
+            for _, attachment in ipairs({a0, a1}) do
+                local ref = Instance.new("ObjectValue")
+                ref.Name = "RageFlareAttachmentCleanup"
+                ref.Value = attachment
+                ref.Parent = folder
+            end
+            local glow = Instance.new("Beam")
+            glow.Name = rayName .. "RedGlow"
+            glow.Attachment0 = a0
+            glow.Attachment1 = a1
+            glow.FaceCamera = true
+            glow.LightEmission = 1
+            glow.ZOffset = 2
+            glow.Color = ColorSequence.new(Color3.fromRGB(255, 10, 22))
+            glow.Transparency = NumberSequence.new(isRing and 0.48 or 0.12)
+            glow.Width0 = isRing and 0.014 or 0.075
+            glow.Width1 = 0.001
+            glow.Parent = folder
+            local core = Instance.new("Beam")
+            core.Name = rayName .. "WhiteCore"
+            core.Attachment0 = a0
+            core.Attachment1 = a1
+            core.FaceCamera = true
+            core.LightEmission = 1
+            core.ZOffset = 2.1
+            core.Color = ColorSequence.new(Color3.fromRGB(255, 252, 245))
+            core.Transparency = NumberSequence.new(isRing and 0.12 or 0)
+            core.Width0 = isRing and 0.006 or 0.024
+            core.Width1 = 0.0005
+            core.Parent = folder
+            table.insert(flareBeams, {glow=glow, core=core, base=isRing and 0.014 or 0.045})
+        end
+        for side = -1, 1, 2 do
+            -- Put the flare just in front of the face surface; the long horizontal
+            -- streak is the visible eye-line, with shorter diagonal glints around it.
+            local center = Vector3.new(side * 0.145, 0.105, -(head.Size.Z * 0.5 + 0.16))
+            local rays = {
+                Vector3.new(side * 0.52, 0.005, 0),
+                Vector3.new(-side * 0.20, 0, 0),
+                Vector3.new(0, -0.16, 0),
+                Vector3.new(0, 0.16, 0),
+                Vector3.new(side * 0.13, 0.11, 0),
+                Vector3.new(-side * 0.13, -0.11, 0)
+            }
+            for index, offset in ipairs(rays) do
+                makeRay(center, center + offset, "RageEyeFlare" .. side .. "_" .. index, false)
+            end
+            local light = Instance.new("PointLight")
+            light.Name = "RageEyeFlareLight"
+            light.Color = Color3.fromRGB(255, 30, 38)
+            light.Brightness = 1.1
+            light.Range = 4
+            light.Parent = head
+            local lightRef = Instance.new("ObjectValue")
+            lightRef.Name = "RageEyeFlareLightCleanup"
+            lightRef.Value = light
+            lightRef.Parent = folder
+            table.insert(flareLights, light)
+        end
+        playerEffectConnections.rage = RunService.RenderStepped:Connect(function()
+            local pulse = 0.72 + math.abs(math.sin(os.clock() * 8)) * 0.28
+            for _, data in ipairs(flareBeams) do
+                if data.glow and data.glow.Parent then
+                    data.glow.Width0 = data.base * (0.82 + pulse * 0.35)
+                end
+                if data.core and data.core.Parent then
+                    data.core.Width0 = data.base * (data.base < 0.02 and 0.42 or 0.34) * (0.9 + pulse * 0.2)
+                end
+            end
+            for _, light in ipairs(flareLights) do
+                if light and light.Parent then light.Brightness = 1.1 + pulse * 1.6 end
+            end
+        end)
+
+    elseif name == "roaring" then
+        -- Flowing ribbon of silhouettes peeling off the player and drifting backward.
+        local afterFolder = Instance.new("Folder")
+        afterFolder.Name = "DarkForge_RoaringAfterimages"
+        afterFolder.Parent = workspace
+        local folderRef = Instance.new("ObjectValue")
+        folderRef.Name = "RoaringAfterimageFolderRef"
+        folderRef.Value = afterFolder
+        folderRef.Parent = folder
+        local elapsed, lastPosition = 0, root.Position
+        local activeGhosts = {}
+        local MAX_GHOSTS, GHOST_INTERVAL, GHOST_LIFETIME = 7, 0.075, 0.52
+
+        local function spawnAfterimage(direction)
+            if not character.Parent or #activeGhosts >= MAX_GHOSTS then return end
+            local wasArchivable = character.Archivable
+            character.Archivable = true
+            local ok, ghost = pcall(function() return character:Clone() end)
+            character.Archivable = wasArchivable
+            if not ok or not ghost then return end
+            ghost.Name = "DarkForge_RoaringSilhouette"
+            for _, obj in ipairs(ghost:GetDescendants()) do
+                if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("Humanoid") or obj:IsA("Animator") then
+                    obj:Destroy()
+                elseif obj:IsA("BasePart") then
+                    obj.Anchored = true
+                    obj.CanCollide = false
+                    obj.CanTouch = false
+                    obj.CanQuery = false
+                    obj.Massless = true
+                    obj.CastShadow = false
+                    obj.Material = Enum.Material.SmoothPlastic
+                    obj.Color = Color3.fromRGB(5, 5, 9)
+                    obj.Transparency = 0.04
+                elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                    obj.Transparency = 1
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+                    obj.Enabled = false
+                end
+            end
+            ghost.Parent = afterFolder
+            for _, obj in ipairs(ghost:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    obj.Anchored = true
+                    obj.CanCollide = false
+                    obj.CanTouch = false
+                    obj.CanQuery = false
+                    obj.Massless = true
+                end
+            end
+            local startPivot = character:GetPivot()
+            ghost:PivotTo(startPivot)
+            local outline = Instance.new("Highlight")
+            outline.Name = "RoaringWhiteInk"
+            outline.Adornee = ghost
+            outline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            outline.FillColor = Color3.new(0, 0, 0)
+            outline.FillTransparency = 0.12
+            outline.OutlineColor = Color3.new(1, 1, 1)
+            outline.OutlineTransparency = 0.02
+            outline.Parent = ghost
+            table.insert(activeGhosts, {model=ghost, outline=outline, startPivot=startPivot, back=-direction, age=0})
+        end
+
+        playerEffectConnections.roaring = RunService.Heartbeat:Connect(function(dt)
+            if not playerEffectStates.roaring or not root.Parent then return end
+            elapsed += dt
+            local displacement = root.Position - lastPosition
+            lastPosition = root.Position
+            local velocity = root.AssemblyLinearVelocity
+            local moving = velocity.Magnitude > 2.5 or displacement.Magnitude > 0.035
+            if moving and elapsed >= GHOST_INTERVAL then
+                elapsed = 0
+                local direction = velocity.Magnitude > 1 and velocity.Unit or displacement.Unit
+                spawnAfterimage(direction)
+            end
+            for i = #activeGhosts, 1, -1 do
+                local data = activeGhosts[i]
+                data.age += dt
+                local alpha = math.clamp(data.age / GHOST_LIFETIME, 0, 1)
+                if data.model and data.model.Parent then
+                    data.model:PivotTo(data.startPivot + data.back * (5.5 * data.age))
+                    local fade = alpha ^ 1.15
+                    for _, part in ipairs(data.model:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.Transparency = 0.04 + fade * 0.96
+                        end
+                    end
+                    if data.outline and data.outline.Parent then
+                        data.outline.FillTransparency = 0.12 + fade * 0.88
+                        data.outline.OutlineTransparency = 0.02 + fade * 0.98
+                    end
+                end
+                if alpha >= 1 then
+                    if data.model then data.model:Destroy() end
+                    table.remove(activeGhosts, i)
+                end
+            end
+        end)
+    end
+end
+
+local function clearWorldAnime()
+    if worldAnimeConnection then worldAnimeConnection:Disconnect(); worldAnimeConnection=nil end
+    if worldAnimeFolder then worldAnimeFolder:Destroy(); worldAnimeFolder=nil end
+    for _, obj in ipairs(worldAnimeObjects) do
+        if obj and obj.Parent then obj:Destroy() end
+    end
+    table.clear(worldAnimeObjects)
+    for part, original in pairs(worldAnimeOriginals) do
+        if part and part.Parent then
+            part.Color = original.color
+            part.Material = original.material
+            part.Reflectance = original.reflectance
+            part:SetAttribute("DarkForgeAnimeOriginalColor", nil)
+            part:SetAttribute("DarkForgeAnimeOriginalMaterial", nil)
+            part:SetAttribute("DarkForgeAnimeOriginalReflectance", nil)
+        end
+    end
+    table.clear(worldAnimeOriginals)
+    local grade = Lighting:FindFirstChild("DarkForgeAnimeWorldGrade")
+    if grade then grade:Destroy() end
+    local bloom = Lighting:FindFirstChild("DarkForgeAnimeWorldBloom")
+    if bloom then bloom:Destroy() end
+end
+
+local function setWorldAnime(enabled)
+    worldAnimeEnabled = enabled
+    clearWorldAnime()
+    if not enabled then return end
+
+    -- World-only comic/cel treatment. Roblox does not expose custom shader
+    -- code to LocalScripts, so geometry is locally posterized and ink-outlined.
+    local grade = Instance.new("ColorCorrectionEffect")
+    grade.Name = "DarkForgeAnimeWorldGrade"
+    grade.Saturation = -0.16
+    grade.Contrast = 0.48
+    grade.Brightness = 0.015
+    grade.TintColor = Color3.fromRGB(255, 246, 238)
+    grade.Parent = Lighting
+    local bloom = Instance.new("BloomEffect")
+    bloom.Name = "DarkForgeAnimeWorldBloom"
+    bloom.Intensity = 0.16
+    bloom.Size = 14
+    bloom.Threshold = 1.35
+    bloom.Parent = Lighting
+
+    worldAnimeFolder = Instance.new("Folder")
+    worldAnimeFolder.Name = "DarkForge_AnimeWorldInk"
+    worldAnimeFolder.Parent = workspace
+    local function stylizeColor(color)
+        local lum = color.R * 0.2126 + color.G * 0.7152 + color.B * 0.0722
+        local band = lum < 0.2 and 0.52 or (lum < 0.45 and 0.74 or (lum < 0.72 and 0.94 or 1.08))
+        return Color3.new(
+            math.clamp(math.floor(color.R * band * 4 + 0.5) / 4, 0, 1),
+            math.clamp(math.floor(color.G * band * 4 + 0.5) / 4, 0, 1),
+            math.clamp(math.floor(color.B * band * 4 + 0.5) / 4, 0, 1)
+        )
+    end
+    local function scanWorld()
+        if not worldAnimeEnabled or not worldAnimeFolder then return end
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local count = 0
+        local params = OverlapParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {char, worldAnimeFolder}
+        params.MaxParts = 220
+        for _, part in ipairs(workspace:GetPartBoundsInRadius(root.Position, 260, params)) do
+            if count >= 90 then break end
+            if part:IsA("BasePart") and part.Transparency < 0.95 then
+                local model = part:FindFirstAncestorOfClass("Model")
+                local isCharacter = model and model:FindFirstChildOfClass("Humanoid") ~= nil
+                if not isCharacter then
+                    if not worldAnimeOriginals[part] then
+                        worldAnimeOriginals[part] = {color=part.Color, material=part.Material, reflectance=part.Reflectance}
+                        part:SetAttribute("DarkForgeAnimeOriginalColor", part.Color)
+                        part:SetAttribute("DarkForgeAnimeOriginalMaterial", part.Material.Name)
+                        part:SetAttribute("DarkForgeAnimeOriginalReflectance", part.Reflectance)
+                        local celColor = stylizeColor(part.Color)
+                        part.Color = celColor
+                        part.Material = Enum.Material.SmoothPlastic
+                        part.Reflectance = 0
+                        local ink = Instance.new("Highlight")
+                        ink.Name = "AnimeWorldInkContour"
+                        ink.Adornee = part
+                        ink.DepthMode = Enum.HighlightDepthMode.Occluded
+                        ink.FillColor = celColor:Lerp(Color3.fromRGB(12, 10, 16), 0.16)
+                        ink.FillTransparency = 0.68
+                        ink.OutlineColor = Color3.fromRGB(20, 17, 22)
+                        ink.OutlineTransparency = 0.02
+                        ink.Parent = worldAnimeFolder
+                        table.insert(worldAnimeObjects, ink)
+                    end
+                    count += 1
+                end
+            end
+        end
+    end
+    scanWorld()
+    local elapsed = 0
+    worldAnimeConnection = RunService.Heartbeat:Connect(function(dt)
+        elapsed += dt
+        if elapsed >= 2.5 then
+            elapsed = 0
+            scanWorld()
+        end
+    end)
+end
+
+local function setPlayerEffect(name, enabled)
+    playerEffectStates[name] = enabled
+    if enabled then applyPlayerEffect(name) else clearPlayerEffect(name) end
+end
+
+local function refreshPlayerEffects()
+    for name, enabled in pairs(playerEffectStates) do
+        if enabled then applyPlayerEffect(name) end
+    end
+end
+
+-- Blindness: black scene, local surface samples, moving-player blue and NPC green.
+local function clearBlindnessVisuals(restoreCharacter)
+    if blindnessGrade then blindnessGrade:Destroy(); blindnessGrade=nil end
+    if blindnessWorldFolder then blindnessWorldFolder:Destroy(); blindnessWorldFolder=nil end
+    table.clear(blindnessWorldHighlights)
+    table.clear(blindnessSurfaceMarkers)
+    for target, h in pairs(blindnessPlayerHighlights) do
+        if h then h:Destroy() end
+        blindnessPlayerHighlights[target] = nil
+    end
+    if blindnessLocalHighlight then blindnessLocalHighlight:Destroy(); blindnessLocalHighlight=nil end
+    if restoreCharacter then
+        for part, original in pairs(blindnessOriginalPlayerColors) do
+            if part and part.Parent then
+                part.Color = original.color
+                part.Material = original.material
+                part.Reflectance = original.reflectance
+            end
+        end
+        table.clear(blindnessOriginalPlayerColors)
+        blindnessColoredCharacter = nil
+    end
+end
+
+local function setBlindness(enabled)
+    blindnessEnabled = enabled
+    clearBlindnessVisuals(true)
+    if not enabled then return end
+    blindnessGrade = Instance.new("ColorCorrectionEffect")
+    blindnessGrade.Name = "DarkForgeBlindnessGrade"
+    -- Leave enough output range for the neon surface samples to remain visible.
+    -- The scene is still almost entirely black, while sampled surfaces can glow gray.
+    blindnessGrade.Brightness = -0.82
+    blindnessGrade.Contrast = 0.12
+    blindnessGrade.Saturation = -1
+    blindnessGrade.TintColor = Color3.new(1, 1, 1)
+    blindnessGrade.Parent = Lighting
+
+    blindnessWorldFolder = Instance.new("Folder")
+    blindnessWorldFolder.Name = "DarkForgeBlindnessHighlights"
+    blindnessWorldFolder.Parent = workspace
+
+    for i = 1, 432 do
+        local marker = Instance.new("Part")
+        marker.Name = "BlindnessSurfaceSample"
+        marker.Shape = Enum.PartType.Ball
+        marker.Anchored = true
+        marker.CanCollide = false
+        marker.CanTouch = false
+        marker.CanQuery = false
+        marker.CastShadow = false
+        marker.Material = Enum.Material.Neon
+        marker.Size = Vector3.new(1.15, 1.15, 1.15)
+        marker.Transparency = 1
+        marker.Parent = blindnessWorldFolder
+        blindnessSurfaceMarkers[i] = marker
+    end
+    blindnessRayParams = RaycastParams.new()
+    blindnessRayParams.FilterType = Enum.RaycastFilterType.Exclude
+    blindnessRayParams.IgnoreWater = true
+    local character = player.Character
+    if character then
+        blindnessLocalHighlight = Instance.new("Highlight")
+        blindnessLocalHighlight.Name = "BlindnessLocalPlayerWhite"
+        blindnessLocalHighlight.Adornee = character
+        blindnessLocalHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        blindnessLocalHighlight.FillColor = Color3.new(1, 1, 1)
+        blindnessLocalHighlight.OutlineColor = Color3.new(1, 1, 1)
+        blindnessLocalHighlight.FillTransparency = 0
+        blindnessLocalHighlight.OutlineTransparency = 0
+        blindnessLocalHighlight.Parent = character
+    end
+end
+
+local function clearThermalVision()
+    if thermalFolder then thermalFolder:Destroy(); thermalFolder=nil end
+    table.clear(thermalHighlights)
+    if thermalGrade then thermalGrade:Destroy(); thermalGrade=nil end
+    if thermalBloom then thermalBloom:Destroy(); thermalBloom=nil end
+end
+
+local function setThermalVision(enabled)
+    thermalVisionESP = enabled
+    clearThermalVision()
+    if not enabled then return end
+    thermalFolder = Instance.new("Folder")
+    thermalFolder.Name = "DarkForgeThermalVision"
+    thermalFolder.Parent = workspace
+    thermalGrade = Instance.new("ColorCorrectionEffect")
+    thermalGrade.Name = "DarkForgeThermalGrade"
+    thermalGrade.TintColor = Color3.fromRGB(115, 175, 255)
+    thermalGrade.Saturation = -0.45
+    thermalGrade.Contrast = 0.22
+    thermalGrade.Brightness = -0.035
+    thermalGrade.Parent = Lighting
+    thermalBloom = Instance.new("BloomEffect")
+    thermalBloom.Name = "DarkForgeThermalBloom"
+    thermalBloom.Intensity = 0.28
+    thermalBloom.Size = 22
+    thermalBloom.Threshold = 0.72
+    thermalBloom.Parent = Lighting
+end
+
+-- FULL CLEANUP FUNCTION
+local function destroyEverything()
+    -- Disable all features
+    if flashstepEnabled then setFlashstep(false) end
+    naoyaMode = false
+    geppoEnabled = false
+    flightEnabled = false
+    speedEnabled = false
+    tpWalkEnabled = false
+    highlightESP = false
+    tracersESP = false
+    boxESP = false
+    doorESP = false
+    statESP = false
+    nightVisionESP = false
+    setBlindness(false)
+    sprinting = false
+    flightBoost = false
+    for effectName in pairs(playerEffectStates) do
+        playerEffectStates[effectName] = false
+        clearPlayerEffect(effectName)
+    end
+    setWorldAnime(false)
+    setThermalVision(false)
+    updateFlightSpeedLines(false)
+    if flightEffectsGui then flightEffectsGui:Destroy(); flightEffectsGui=nil end
+    if flightSpeedLineFolder then flightSpeedLineFolder:Destroy(); flightSpeedLineFolder=nil end
+    flightSpeedLines={}; flightNotice=nil
+    -- Stop flight
+    if flightBV then
+        flightBV:Destroy()
+        flightBV = nil
+    end
+    if flightBG then flightBG:Destroy(); flightBG=nil end
+    for _, t in pairs(flightTracks) do
+        if t then pcall(function() t:Stop() end) end
+    end
+    -- Restore AutoRotate
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.AutoRotate = originalAutoRotate
+        end
+    end
+    -- Clear ESP
+    for _, h in pairs(playerHighlights) do if h then h:Destroy() end end
+    table.clear(playerHighlights)
+    for _, h in pairs(doorHighlights) do if h then h:Destroy() end end
+    table.clear(doorHighlights)
+    clearDrawings(tracerLines)
+    clearDrawings(boxLines)
+    for p in pairs(espObjects) do removePlayerESP(p) end
+    if espGui then espGui:Destroy() espGui=nil end
+    local nvEffect=Lighting:FindFirstChild("DarkForgeNightVisionColor")
+    if nvEffect then nvEffect:Destroy() end
+    -- Clear keybinds
+    table.clear(keybinds)
+    if bindConnection then
+        bindConnection:Disconnect()
+        bindConnection = nil
+    end
+    waitingForBind = nil
+    -- Disconnect all connections
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    table.clear(connections)
+    -- Destroy GUI
+    local gui = playerGui:FindFirstChild("DarkForgeNaoyaUI")
+    if gui then
+        gui:Destroy()
+    end
+end
+-- COLOR + TRANS SLIDERS
+local function createColorSlider(parent, label, defaultCol, callback)
+    local holder = create("Frame", {Size = UDim2.new(1, 0, 0, 70), BackgroundTransparency = 1}, parent)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = TEXT,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, holder)
+    local preview = create("Frame", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -30, 0, 20),
+        BackgroundColor3 = defaultCol,
+        BorderSizePixel = 0
+    }, holder)
+    corner(preview, 6)
+    local function makeChannel(name, y, value, channelCallback)
+        create("TextLabel", {
+            Size = UDim2.new(0, 14, 0, 14),
+            Position = UDim2.new(0, 0, 0, y),
+            BackgroundTransparency = 1,
+            Text = name,
+            TextColor3 = MUTED,
+            Font = Enum.Font.Gotham,
+            TextSize = 11
+        }, holder)
+        local bar = create("Frame", {
+            Size = UDim2.new(1, -50, 0, 10),
+            Position = UDim2.new(0, 18, 0, y + 2),
+            BackgroundColor3 = BG3,
+            BorderSizePixel = 0
+        }, holder)
+        corner(bar, 4)
+        local fill = create("Frame", {
+            Size = UDim2.new(value, 0, 1, 0),
+            BackgroundColor3 = ACCENT,
+            BorderSizePixel = 0
+        }, bar)
+        corner(fill, 4)
+        local sliding = false
+        bar.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 then sliding = true end
+        end)
+        UserInputService.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 then sliding = false end
+        end)
+        UserInputService.InputChanged:Connect(function(i)
+            if sliding and i.UserInputType == Enum.UserInputType.MouseMovement then
+                local rel = math.clamp((i.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(rel, 0, 1, 0)
+                channelCallback(rel)
+            end
+        end)
+    end
+    local r, g, b = defaultCol.R, defaultCol.G, defaultCol.B
+    makeChannel("R", 20, r, function(v) r = v local c = Color3.new(r,g,b) preview.BackgroundColor3 = c callback(c) end)
+    makeChannel("G", 36, g, function(v) g = v local c = Color3.new(r,g,b) preview.BackgroundColor3 = c callback(c) end)
+    makeChannel("B", 52, b, function(v) b = v local c = Color3.new(r,g,b) preview.BackgroundColor3 = c callback(c) end)
+end
+local function createTransSlider(parent, label, default, callback)
+    local holder = create("Frame", {Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1}, parent)
+    create("TextLabel", {
+        Size = UDim2.new(0.4, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = TEXT,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, holder)
+    local bar = create("Frame", {
+        Size = UDim2.new(0.55, 0, 0, 10),
+        Position = UDim2.new(0.42, 0, 0.5, -5),
+        BackgroundColor3 = BG3,
+        BorderSizePixel = 0
+    }, holder)
+    corner(bar, 4)
+    local fill = create("Frame", {
+        Size = UDim2.new(default, 0, 1, 0),
+        BackgroundColor3 = ACCENT,
+        BorderSizePixel = 0
+    }, bar)
+    corner(fill, 4)
+    local sliding = false
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then sliding = true end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then sliding = false end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if sliding and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local rel = math.clamp((i.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            callback(rel)
+        end
+    end)
+end
+-- KEYBIND
+local function clearWaiting()
+    if waitingForBind then
+        waitingForBind.Text = "⌨"
+        waitingForBind.BackgroundColor3 = BG3
+        waitingForBind = nil
+    end
+    if bindConnection then
+        bindConnection:Disconnect()
+        bindConnection = nil
+    end
+end
+local function startListening(btn, fn)
+    clearWaiting()
+    waitingForBind = btn
+    btn.Text = "..."
+    btn.BackgroundColor3 = Color3.fromRGB(80, 60, 20)
+    bindConnection = UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        local key = input.KeyCode
+        if key == Enum.KeyCode.Unknown then return end
+        for k, f in pairs(keybinds) do
+            if f == fn then keybinds[k] = nil end
+        end
+        keybinds[key] = fn
+        btn.Text = key.Name
+        btn.BackgroundColor3 = currentAccent
+        clearWaiting()
+    end)
+end
+addConn(UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or waitingForBind then return end
+    local fn = keybinds[input.KeyCode]
+    if fn then fn() end
+end))
+-- INTRO
+local function playIntro(cb)
+    local blur = Instance.new("BlurEffect", Lighting)
+    blur.Size = 0
+    TweenService:Create(blur, TweenInfo.new(0.5), {Size = 18}):Play()
+    local g = create("ScreenGui", {IgnoreGuiInset = true, DisplayOrder = 100}, playerGui)
+    local overlay = create("Frame", {
+        Size = UDim2.new(1,0,1,0),
+        BackgroundColor3 = Color3.new(0,0,0),
+        BackgroundTransparency = 1
+    }, g)
+    local title = create("TextLabel", {
+        Size = UDim2.new(1,0,0,70),
+        Position = UDim2.new(0,0,0.42,0),
+        BackgroundTransparency = 1,
+        Text = "Ω V0IDZ Hub Ω",
+        TextColor3 = Color3.fromRGB(190,140,255),
+        Font = Enum.Font.GothamBlack,
+        TextSize = 48,
+        TextTransparency = 1
+    }, g)
+    TweenService:Create(overlay, TweenInfo.new(0.55), {BackgroundTransparency = 0.4}):Play()
+    TweenService:Create(title, TweenInfo.new(0.65), {TextTransparency = 0}):Play()
+    local snd = Instance.new("Sound", g)
+    snd.SoundId = SOUND_INTRO
+    snd.Volume = 0.8
+    snd:Play()
+    task.wait(2.8)
+    TweenService:Create(snd, TweenInfo.new(2.1), {Volume = 0}):Play()
+    TweenService:Create(title, TweenInfo.new(1.9), {TextTransparency = 1, TextSize = 30}):Play()
+    TweenService:Create(overlay, TweenInfo.new(1.9), {BackgroundTransparency = 1}):Play()
+    TweenService:Create(blur, TweenInfo.new(1.9), {Size = 0}):Play()
+    task.wait(2.1)
+    snd:Destroy()
+    blur:Destroy()
+    g:Destroy()
+    if cb then cb() end
+end
+-- FLIGHT
+local function loadAnim(id, loop)
+    local char = player.Character
+    if not char then return nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return nil end
+    local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
+    local a = Instance.new("Animation")
+    a.AnimationId = id
+    local ok, track = pcall(function() return animator:LoadAnimation(a) end)
+    if ok and track then
+        track.Looped = loop
+        track.Priority = Enum.AnimationPriority.Action4
+        return track
+    end
+    return nil
+end
+local function stopFlightAnims()
+    for _, t in pairs(flightTracks) do
+        if t then t:Stop(0.15) end
+    end
+    currentFlightAnim = nil
+end
+local function playFlightAnim(name)
+    if currentFlightAnim == name then return end
+    stopFlightAnims()
+    local t = flightTracks[name]
+    if t then
+        t:Play(0.12)
+        currentFlightAnim = name
+        if name == "forward" then
+            t.TimePosition = 0.8
+            task.spawn(function()
+                while currentFlightAnim == "forward" and t.IsPlaying do
+                    if t.TimePosition >= 0.9 then t.TimePosition = 0.8 end
+                    task.wait()
+                end
+            end)
+        end
+    end
+end
+local function enableFlight()
+    flightEnabled = true
+    sprinting = false
+    flightBoost = false
+    ensureFlightVisuals()
+    showFlightNotification()
+    local char = player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not root then return end
+    if hum then
+        originalAutoRotate = hum.AutoRotate
+        hum.AutoRotate = false
+    end
+    if flightBV then flightBV:Destroy() end
+    if flightBG then flightBG:Destroy(); flightBG=nil end
+    flightBV = Instance.new("BodyVelocity")
+    flightBV.MaxForce = Vector3.new(40000, 40000, 40000)
+    flightBV.Velocity = Vector3.zero
+    flightBV.Parent = root
+    -- High-torque gyro overrides animation/character yaw correction so the
+    -- torso follows the camera pitch continuously, including straight up/down.
+    flightBG = Instance.new("BodyGyro")
+    flightBG.Name = "DarkForge_FlightFacing"
+    flightBG.P = 90000
+    flightBG.D = 1800
+    flightBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    flightBG.CFrame = workspace.CurrentCamera.CFrame
+    flightBG.Parent = root
+    flightTracks.idle    = loadAnim(FLIGHT_IDLE_ANIM, true)
+    flightTracks.toggle  = loadAnim(FLIGHT_TOGGLE_ANIM, false)
+    flightTracks.forward = loadAnim(FLIGHT_FORWARD_ANIM, true)
+    flightTracks.back    = loadAnim(FLIGHT_BACK_ANIM, true)
+    if flightTracks.toggle then
+        flightTracks.toggle:Play(0.1)
+    end
+    local start = tick()
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        local a = 1 - math.clamp((tick() - start) / 1, 0, 1)
+        if a <= 0 or not flightEnabled then
+            conn:Disconnect()
+            return
+        end
+        if flightBV then
+            flightBV.Velocity = Vector3.new(0, 14 * a, 0)
+        end
+    end)
+    task.delay(1, function()
+        if flightEnabled then playFlightAnim("idle") end
+    end)
+    originalFOV = workspace.CurrentCamera.FieldOfView
+    targetFOV = originalFOV
+end
+local function disableFlight()
+    flightEnabled = false
+    sprinting = false
+    flightBoost = false
+    updateFlightSpeedLines(false)
+    stopFlightAnims()
+    if flightBV then flightBV:Destroy() flightBV = nil end
+    if flightBG then flightBG:Destroy(); flightBG=nil end
+    flightSpeed = 0
+    targetFlightSpeed = 0
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.AutoRotate = originalAutoRotate
+        end
+    end
+    TweenService:Create(workspace.CurrentCamera, TweenInfo.new(0.5), {
+        FieldOfView = originalFOV
+    }):Play()
+end
+-- GEPPО IMPACT FX: layered expanding shock rings and a concentrated launch burst.
+local function createGeppoBurst(root)
+    if not root or not root.Parent then return end
+    local fx = Instance.new("Folder")
+    fx.Name = "DarkForge_GeppoBurst"
+    fx.Parent = workspace
+    local origin = root.Position - Vector3.new(0, 1.65, 0)
+
+    for index, config in ipairs({
+        {color=Color3.fromRGB(235,250,255), delay=0, diameter=10.5, thickness=0.16},
+        {color=Color3.fromRGB(55,190,255), delay=0.055, diameter=7.5, thickness=0.11},
+        {color=Color3.fromRGB(105,115,255), delay=0.11, diameter=5.2, thickness=0.08}
+    }) do
+        local ring = Instance.new("Part")
+        ring.Name = "GeppoShockRing" .. index
+        ring.Shape = Enum.PartType.Cylinder
+        ring.Material = Enum.Material.Neon
+        ring.Color = config.color
+        ring.Transparency = 0.08
+        ring.Anchored = true
+        ring.CanCollide = false
+        ring.CanTouch = false
+        ring.CanQuery = false
+        ring.CastShadow = false
+        ring.Size = Vector3.new(config.thickness, 0.7, 0.7)
+        ring.CFrame = CFrame.new(origin) * CFrame.Angles(0, 0, math.rad(90))
+        ring.Parent = fx
+        task.delay(config.delay, function()
+            if not ring.Parent then return end
+            TweenService:Create(ring, TweenInfo.new(0.34, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+                Size=Vector3.new(config.thickness, config.diameter, config.diameter),
+                Transparency=1
+            }):Play()
+        end)
+    end
+
+    local burstAnchor = Instance.new("Part")
+    burstAnchor.Name = "GeppoBurstAnchor"
+    burstAnchor.Size = Vector3.new(0.2,0.2,0.2)
+    burstAnchor.Transparency = 1
+    burstAnchor.Anchored = true
+    burstAnchor.CanCollide = false
+    burstAnchor.CanTouch = false
+    burstAnchor.CanQuery = false
+    burstAnchor.CFrame = CFrame.new(origin)
+    burstAnchor.Parent = fx
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = burstAnchor
+    local sparks = Instance.new("ParticleEmitter")
+    sparks.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+    sparks.Color = ColorSequence.new(Color3.fromRGB(255,255,255), Color3.fromRGB(65,185,255))
+    sparks.LightEmission = 1
+    sparks.LightInfluence = 0
+    sparks.SpreadAngle = Vector2.new(180, 180)
+    sparks.Speed = NumberRange.new(18, 42)
+    sparks.Drag = 5
+    sparks.Lifetime = NumberRange.new(0.22, 0.48)
+    sparks.Rotation = NumberRange.new(0,360)
+    sparks.RotSpeed = NumberRange.new(-180,180)
+    sparks.Size = NumberSequence.new({NumberSequenceKeypoint.new(0,0.22), NumberSequenceKeypoint.new(0.3,0.12), NumberSequenceKeypoint.new(1,0)})
+    sparks.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0,0), NumberSequenceKeypoint.new(1,1)})
+    sparks.Parent = attachment
+    sparks:Emit(48)
+
+    local light = Instance.new("PointLight")
+    light.Color = Color3.fromRGB(95,195,255)
+    light.Brightness = 5
+    light.Range = 15
+    light.Parent = burstAnchor
+    TweenService:Create(light, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Brightness=0, Range=2}):Play()
+    game:GetService("Debris"):AddItem(fx, 1.1)
+end
+
+-- BUILD UI
+setFlashstep = function(enabled)
+    if enabled == flashstepEnabled then return end
+    local character = player.Character
+    local camera = workspace.CurrentCamera
+    if enabled then
+        if not character then return end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if not humanoid or not root then return end
+        local oldArchivable = character.Archivable
+        character.Archivable = true
+        local clone = character:Clone()
+        character.Archivable = oldArchivable
+        if not clone then return end
+        clone.Name = "DarkForge_FlashstepReplica"
+        for _, obj in ipairs(clone:GetDescendants()) do
+            if obj.Name:match("^DarkForge_") or obj:IsA("Script") or obj:IsA("LocalScript") then
+                obj:Destroy()
+            elseif obj:IsA("BasePart") then
+                obj.CanCollide = false
+                obj.CanTouch = false
+                obj.CanQuery = false
+                obj.Massless = true
+            end
+        end
+        local cloneHum = clone:FindFirstChildOfClass("Humanoid")
+        local cloneRoot = clone:FindFirstChild("HumanoidRootPart")
+        if not cloneHum or not cloneRoot then clone:Destroy(); return end
+        clone.Parent = workspace
+        clone:PivotTo(root.CFrame)
+        cloneHum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        cloneHum.PlatformStand = true
+        cloneRoot.Anchored = true
+        flashstepOrigin = root.Position
+        flashstepOriginal = {
+            character=character, humanoid=humanoid, root=root,
+            anchored=root.Anchored, platformStand=humanoid.PlatformStand,
+            autoRotate=humanoid.AutoRotate, walkSpeed=humanoid.WalkSpeed,
+            jumpPower=humanoid.JumpPower, jumpHeight=humanoid.JumpHeight,
+            useJumpPower=humanoid.UseJumpPower
+        }
+        flashstepCameraSubject = camera and camera.CameraSubject
+        root.Anchored = true
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.JumpHeight = 0
+        humanoid.AutoRotate = false
+        humanoid.PlatformStand = true
+        flashstepClone = clone
+        flashstepEnabled = true
+        if camera then camera.CameraSubject = cloneHum end
+    else
+        flashstepEnabled = false
+        local original = flashstepOriginal
+        local clone = flashstepClone
+        local cloneRoot = clone and clone:FindFirstChild("HumanoidRootPart")
+        if original and original.root and original.root.Parent then
+            if cloneRoot then
+                local destination = cloneRoot.Position
+                local delta = destination - flashstepOrigin
+                if delta.Magnitude > flashstepRange then
+                    destination = flashstepOrigin + delta.Unit * flashstepRange
+                end
+                original.root.CFrame = CFrame.new(destination) * cloneRoot.CFrame.Rotation
+            end
+            original.root.Anchored = original.anchored
+            if original.humanoid and original.humanoid.Parent then
+                original.humanoid.PlatformStand = original.platformStand
+                original.humanoid.AutoRotate = original.autoRotate
+                original.humanoid.WalkSpeed = original.walkSpeed
+                original.humanoid.JumpPower = original.jumpPower
+                original.humanoid.JumpHeight = original.jumpHeight
+                original.humanoid.UseJumpPower = original.useJumpPower
+            end
+        end
+        if camera then
+            local originalHum = original and original.humanoid
+            camera.CameraSubject = (originalHum and originalHum.Parent and originalHum) or flashstepCameraSubject
+        end
+        if clone then clone:Destroy() end
+        flashstepClone = nil
+        flashstepOrigin = nil
+        flashstepOriginal = nil
+        flashstepCameraSubject = nil
+    end
+end
+
+local function updateFlashstep(dt)
+    if not flashstepEnabled or not flashstepClone then return end
+    local root = flashstepClone:FindFirstChild("HumanoidRootPart")
+    if not root then setFlashstep(false); return end
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    local forward = Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
+    local right = Vector3.new(camera.CFrame.RightVector.X,0,camera.CFrame.RightVector.Z)
+    if forward.Magnitude > 0 then forward = forward.Unit end
+    if right.Magnitude > 0 then right = right.Unit end
+    local move = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up) then move += forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) or UserInputService:IsKeyDown(Enum.KeyCode.Down) then move -= forward end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then move += right end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then move -= right end
+    local vertical = 0
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then vertical += 1 end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.C) then vertical -= 1 end
+    local gamepadOk, gamepadState = pcall(function() return UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1) end)
+    if gamepadOk then
+        for _, input in ipairs(gamepadState) do
+            if input.KeyCode == Enum.KeyCode.Thumbstick1 then
+                move += right * input.Position.X + forward * input.Position.Y
+            end
+        end
+    end
+    local buttonsOk, ascendDown = pcall(function()
+        return UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonA)
+    end)
+    if buttonsOk and ascendDown then vertical = 1 end
+    local descendOk, descendDown = pcall(function()
+        return UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonB)
+    end)
+    if descendOk and descendDown then vertical = -1 end
+    local direction = move + Vector3.new(0,vertical,0)
+    if direction.Magnitude > 1 then direction = direction.Unit end
+    local nextPosition = root.Position + direction * flashstepMoveSpeed * math.min(dt,0.05)
+    local displacement = nextPosition - flashstepOrigin
+    if displacement.Magnitude > flashstepRange then
+        nextPosition = flashstepOrigin + displacement.Unit * flashstepRange
+    end
+    local face = Vector3.new(camera.CFrame.LookVector.X,0,camera.CFrame.LookVector.Z)
+    if face.Magnitude < 0.001 then face = root.CFrame.LookVector end
+    root.CFrame = CFrame.lookAt(nextPosition, nextPosition + face.Unit)
+end
+
+local function buildUI()
+    local gui = create("ScreenGui", {
+        Name = "DarkForgeNaoyaUI",
+        ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    }, playerGui)
+    -- When GUI is destroyed, clean everything
+    gui.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            destroyEverything()
+        end
+    end)
+    local main = create("Frame", {
+        Size = UDim2.new(0, UI_WIDTH, 0, UI_HEIGHT),
+        Position = UDim2.new(0.5, -UI_WIDTH/2, 0.5, -UI_HEIGHT/2),
+        BackgroundColor3 = BG,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        BackgroundTransparency = 1
+    }, gui)
+    corner(main, 10)
+    main.Size = UDim2.new(0, UI_WIDTH * 0.85, 0, UI_HEIGHT * 0.85)
+    TweenService:Create(main, TweenInfo.new(0.4, Enum.EasingStyle.Quart), {
+        Size = UDim2.new(0, UI_WIDTH, 0, UI_HEIGHT),
+        BackgroundTransparency = 0
+    }):Play()
+    local titleBar = create("Frame", {
+        Size = UDim2.new(1, 0, 0, TITLE_H),
+        BackgroundColor3 = BG2,
+        BorderSizePixel = 0
+    }, main)
+    corner(titleBar, 10)
+    create("TextLabel", {
+        Size = UDim2.new(1, -80, 1, 0),
+        Position = UDim2.new(0, 12, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "Ω V0IDZ HUB Ω  •  v" .. VERSION,
+        TextColor3 = TEXT,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, titleBar)
+    local collapseBtn = create("TextButton", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -66, 0.5, -14),
+        BackgroundColor3 = BG3,
+        Text = "–",
+        TextColor3 = TEXT,
+        Font = Enum.Font.GothamBold,
+        TextSize = 18
+    }, titleBar)
+    corner(collapseBtn, 6)
+    local closeBtn = create("TextButton", {
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(1, -32, 0.5, -14),
+        BackgroundColor3 = Color3.fromRGB(180, 45, 45),
+        Text = "X",
+        TextColor3 = TEXT,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14
+    }, titleBar)
+    corner(closeBtn, 6)
+    closeBtn.MouseButton1Click:Connect(function()
+        destroyEverything()
+    end)
+    -- Drag
+    titleBar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag.active = true
+            drag.start = i.Position
+            drag.origin = main.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if drag.active and i.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = i.Position - drag.start
+            main.Position = UDim2.new(drag.origin.X.Scale, drag.origin.X.Offset + d.X, drag.origin.Y.Scale, drag.origin.Y.Offset + d.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then drag.active = false end
+    end)
+    -- Collapse top
+    collapseBtn.MouseButton1Click:Connect(function()
+        collapsed = not collapsed
+        local abs = main.AbsolutePosition
+        TweenService:Create(main, TweenInfo.new(0.25), {
+            Size = collapsed and UDim2.new(0, UI_WIDTH, 0, COLLAPSED_H) or UDim2.new(0, UI_WIDTH, 0, UI_HEIGHT),
+            Position = UDim2.new(0, abs.X, 0, abs.Y)
+        }):Play()
+        collapseBtn.Text = collapsed and "+" or "–"
+    end)
+    -- Tabs
+    local tabBar = create("ScrollingFrame", {
+        Size = UDim2.new(1, -16, 0, 34),
+        Position = UDim2.new(0, 8, 0, TITLE_H + 6),
+        BackgroundTransparency = 1,
+        ScrollBarThickness = 3,
+        ScrollingDirection = Enum.ScrollingDirection.X,
+        AutomaticCanvasSize = Enum.AutomaticSize.X
+    }, main)
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6)}, tabBar)
+    local content = create("Frame", {
+        Size = UDim2.new(1, -16, 1, -TITLE_H - 50),
+        Position = UDim2.new(0, 8, 0, TITLE_H + 44),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true
+    }, main)
+    local tabs = {}
+    local function switchTab(n)
+        for name, d in pairs(tabs) do
+            d.page.Visible = (name == n)
+            d.btn.BackgroundColor3 = (name == n) and currentAccent or BG3
+            d.btn.TextColor3 = (name == n) and Color3.new(0, 0, 0) or TEXT
+        end
+    end
+    local function createTab(name, order)
+        local btn = create("TextButton", {
+            Size = UDim2.new(0, 82, 0, 28),
+            BackgroundColor3 = BG3,
+            Text = name,
+            TextColor3 = TEXT,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            LayoutOrder = order,
+            AutoButtonColor = false
+        }, tabBar)
+        corner(btn, 6)
+        registerAccent(btn, "BackgroundColor3")
+        local page = create("ScrollingFrame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Visible = false,
+            ScrollBarThickness = 4,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y
+        }, content)
+        create("UIListLayout", {Padding = UDim.new(0, 8)}, page)
+        create("UIPadding", {
+            PaddingTop = UDim.new(0, 6),
+            PaddingBottom = UDim.new(0, 12),
+            PaddingLeft = UDim.new(0, 4),
+            PaddingRight = UDim.new(0, 4)
+        }, page)
+        btn.MouseButton1Click:Connect(function()
+            playSound(SOUND_NORMAL)
+            switchTab(name)
+        end)
+        tabs[name] = {btn = btn, page = page}
+        return page
+    end
+    local tabOrder = {"Update Log", "General", "Combat", "Helpful", "Visions", "Effects", "Player", "Settings", "Fun!"}
+    local pageLog      = createTab("Update Log", 1)
+    local pageGeneral  = createTab("General", 2)
+    local pageCombat   = createTab("Combat", 3)
+    local pageHelpful  = createTab("Helpful", 4)
+    local pageVisions  = createTab("Visions", 5)
+    local pageEffects  = createTab("Effects", 6)
+    local pagePlayer   = createTab("Player", 7)
+    local pageSettings = createTab("Settings", 8)
+    local pageFun      = createTab("Fun!", 9)
+    switchTab("Update Log")
+    --------------------------------------------------------------------
+    -- CREATORS
+    --------------------------------------------------------------------
+    local function createBind(parent, fn)
+        local b = create("TextButton", {
+            Size = UDim2.new(0, 32, 0, 26),
+            Position = UDim2.new(1, -34, 0.5, -13),
+            BackgroundColor3 = BG3,
+            Text = "⌨",
+            TextColor3 = TEXT,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12
+        }, parent)
+        corner(b, 5)
+        b.MouseButton1Click:Connect(function() startListening(b, fn) end)
+        return b
+    end
+    local function createSwitch(parent, text, default, cb)
+        local holder = create("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1}, parent)
+        create("TextLabel", {
+            Size = UDim2.new(1, -100, 1, 0),
+            BackgroundTransparency = 1,
+            Text = text,
+            TextColor3 = TEXT,
+            Font = Enum.Font.Gotham,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left
+        }, holder)
+        local track = create("Frame", {
+            Size = UDim2.new(0, 46, 0, 22),
+            Position = UDim2.new(1, -84, 0.5, -11),
+            BackgroundColor3 = default and currentAccent or BG3
+        }, holder)
+        corner(track, 11)
+        local knob = create("Frame", {
+            Size = UDim2.new(0, 18, 0, 18),
+            Position = default and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9),
+            BackgroundColor3 = TEXT
+        }, track)
+        corner(knob, 9)
+        local state = default
+        if state then activeSwitchTracks[track] = true end
+        local function toggle()
+            state = not state
+            TweenService:Create(knob, TweenInfo.new(0.15), {
+                Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+            }):Play()
+            TweenService:Create(track, TweenInfo.new(0.15), {
+                BackgroundColor3 = state and currentAccent or BG3
+            }):Play()
+            if state then activeSwitchTracks[track] = true else activeSwitchTracks[track] = nil end
+            playSound(SOUND_NORMAL, state and 1 or 0.8)
+            if cb then cb(state) end
+        end
+        create("TextButton", {
+            Size = UDim2.new(1, -40, 1, 0),
+            BackgroundTransparency = 1,
+            Text = ""
+        }, holder).MouseButton1Click:Connect(toggle)
+        createBind(holder, toggle)
+    end
+    local function createRangeSlider(parent, label, minValue, maxValue, defaultValue, step, callback)
+        local holder = create("Frame", {Size=UDim2.new(1,0,0,42), BackgroundTransparency=1}, parent)
+        local valueLabel = create("TextLabel", {Size=UDim2.new(1,0,0,16), BackgroundTransparency=1, Text=label..": "..tostring(defaultValue), TextColor3=TEXT, Font=Enum.Font.Gotham, TextSize=12, TextXAlignment=Enum.TextXAlignment.Left}, holder)
+        local bar = create("Frame", {Size=UDim2.new(1,-8,0,9), Position=UDim2.new(0,4,0,25), BackgroundColor3=BG3, BorderSizePixel=0}, holder)
+        corner(bar,5)
+        local initial = math.clamp((defaultValue-minValue)/(maxValue-minValue),0,1)
+        local fill = create("Frame", {Size=UDim2.new(initial,0,1,0), BackgroundColor3=ACCENT, BorderSizePixel=0}, bar)
+        corner(fill,5)
+        local dragging = false
+        local function setFromX(x)
+            local alpha = math.clamp((x-bar.AbsolutePosition.X)/math.max(bar.AbsoluteSize.X,1),0,1)
+            local raw = minValue + (maxValue-minValue)*alpha
+            local value = math.floor(raw/step+0.5)*step
+            value = math.clamp(value,minValue,maxValue)
+            local normalized = (value-minValue)/(maxValue-minValue)
+            fill.Size = UDim2.new(normalized,0,1,0)
+            valueLabel.Text = label..": "..tostring(value)
+            callback(value)
+        end
+        bar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging=true; setFromX(input.Position.X) end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then setFromX(input.Position.X) end
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging=false end
+        end)
+    end
+    local function createBtn(parent, text, cb)
+        local holder = create("Frame", {Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1}, parent)
+        local btn = create("TextButton", {
+            Size = UDim2.new(1, -40, 1, 0),
+            BackgroundColor3 = BG3,
+            Text = text,
+            TextColor3 = TEXT,
+            Font = Enum.Font.Gotham,
+            TextSize = 13
+        }, holder)
+        corner(btn, 6)
+        local function act()
+            playSound(SOUND_NORMAL)
+            if cb then cb() end
+        end
+        btn.MouseButton1Click:Connect(act)
+        createBind(holder, act)
+    end
+    local function divider(parent, t)
+        create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 22),
+            BackgroundTransparency = 1,
+            Text = "— " .. t .. " —",
+            TextColor3 = MUTED,
+            Font = Enum.Font.Gotham,
+            TextSize = 12
+        }, parent)
+    end
+    --------------------------------------------------------------------
+    -- GENERAL
+    --------------------------------------------------------------------
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Text = "Time: --",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Code,
+        TextSize = 14,
+        Name = "TimeLabel"
+    }, pageGeneral)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Text = "Date: --",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Code,
+        TextSize = 14,
+        Name = "DateLabel"
+    }, pageGeneral)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Text = "User: " .. player.DisplayName,
+        TextColor3 = TEXT,
+        Font = Enum.Font.Gotham,
+        TextSize = 13
+    }, pageGeneral)
+    divider(pageGeneral, "Server")
+    local serverStatus = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+        Text = "Server actions are ready.", TextColor3 = MUTED,
+        Font = Enum.Font.Gotham, TextSize = 11, TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, pageGeneral)
+    createBtn(pageGeneral, "Rejoin Server", function()
+        serverStatus.Text = "Rejoining this server..."
+        local ok, err = pcall(function()
+            if game.JobId == "" then error("Current server ID is unavailable in Studio.") end
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+        end)
+        if not ok then serverStatus.Text = "Rejoin failed: " .. tostring(err) end
+    end)
+    createBtn(pageGeneral, "Server Hop", function()
+        serverStatus.Text = "Requesting another server through Roblox matchmaking..."
+        local ok, err = pcall(function()
+            TeleportService:Teleport(game.PlaceId, player)
+        end)
+        if not ok then serverStatus.Text = "Server hop failed: " .. tostring(err) end
+    end)
+    task.spawn(function()
+        while gui and gui.Parent do
+            local t = os.date("*t")
+            local tl = pageGeneral:FindFirstChild("TimeLabel")
+            local dl = pageGeneral:FindFirstChild("DateLabel")
+            if tl then tl.Text = string.format("Time: %02d:%02d:%02d", t.hour, t.min, t.sec) end
+            if dl then dl.Text = string.format("Date: %04d/%02d/%02d", t.year, t.month, t.day) end
+            task.wait(1)
+        end
+    end)
+    --------------------------------------------------------------------
+    -- COMBAT
+    --------------------------------------------------------------------
+    createSwitch(pageCombat, "Naoya Mode", false, function(s)
+        naoyaMode = s
+        playSound(s and SOUND_NAOYA_ON or SOUND_NAOYA_OFF)
+    end)
+    local modeLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "Mode: infront",
+        TextColor3 = MUTED,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, pageCombat)
+    for _, m in ipairs({"infront", "behind", "above", "spazm"}) do
+        createBtn(pageCombat, "Set " .. m, function()
+            naoyaModeType = m
+            modeLabel.Text = "Mode: " .. m
+        end)
+    end
+    divider(pageCombat, "Flight")
+    createSwitch(pageCombat, "Flight", false, function(s)
+        if s then enableFlight() else disableFlight() end
+    end)
+    --------------------------------------------------------------------
+    -- HELPFUL
+    --------------------------------------------------------------------
+    createBtn(pageHelpful, "Insta doors / insta pickup", function()
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("ProximityPrompt") then
+                o.HoldDuration = 0
+            end
+        end
+    end)
+    --------------------------------------------------------------------
+    -- VISIONS
+    --------------------------------------------------------------------
+    createSwitch(pageVisions, "Highlight ESP", false, function(s)
+        highlightESP = s
+        if not s then
+            for _, h in pairs(playerHighlights) do if h then h:Destroy() end end
+            table.clear(playerHighlights)
+        end
+    end)
+    createSwitch(pageVisions, "Tracers", false, function(s)
+        tracersESP = s
+        if not s then clearDrawings(tracerLines) end
+    end)
+    createSwitch(pageVisions, "Box ESP", false, function(s)
+        boxESP = s
+        if not s then clearDrawings(boxLines) end
+    end)
+    createSwitch(pageVisions, "Door ESP", false, function(s)
+        doorESP = s
+        if not s then
+            for _, h in pairs(doorHighlights) do if h then h:Destroy() end end
+            table.clear(doorHighlights)
+        end
+    end)
+    createSwitch(pageVisions, "Stat ESP", false, function(s)
+        statESP = s
+    end)
+    createSwitch(pageVisions, "Thermal Vision ESP", false, function(s)
+        setThermalVision(s)
+    end)
+    createSwitch(pageVisions, "Nightvision ESP", false, function(s)
+        ensureESPGui()
+        nightVisionESP = s
+        playSound(s and SOUND_NIGHTVISION_ON or SOUND_NIGHTVISION_OFF)
+        if s then
+            nightVisionPrevious = {highlightESP=highlightESP, tracersESP=tracersESP, boxESP=boxESP, statESP=statESP}
+            highlightESP, tracersESP, boxESP, statESP = false, false, false, false
+            for _, h in pairs(playerHighlights) do if h then h:Destroy() end end
+            table.clear(playerHighlights)
+            clearDrawings(tracerLines); clearDrawings(boxLines)
+            nightVisionTint.Visible=true; nightVisionHud.Visible=true
+            local staticLayer=espGui:FindFirstChild("NVStaticLayer"); if staticLayer then staticLayer.Visible=true end
+            local cornerLayer=espGui:FindFirstChild("NVScreenCorners"); if cornerLayer then cornerLayer.Visible=true end
+            local effect=Lighting:FindFirstChild("DarkForgeNightVisionColor") or Instance.new("ColorCorrectionEffect")
+            effect.Name="DarkForgeNightVisionColor"; effect.TintColor=Color3.fromRGB(185,255,195)
+            effect.Saturation=-.18; effect.Contrast=.12; effect.Brightness=.025; effect.Parent=Lighting
+        else
+            if nightVisionTint then nightVisionTint.Visible=false end
+            if nightVisionHud then nightVisionHud.Visible=false end
+            local staticLayer=espGui and espGui:FindFirstChild("NVStaticLayer"); if staticLayer then staticLayer.Visible=false end
+            local cornerLayer=espGui and espGui:FindFirstChild("NVScreenCorners"); if cornerLayer then cornerLayer.Visible=false end
+            -- Remove every duplicate NV color grade, including leftovers from older runs.
+            for _, effect in ipairs(Lighting:GetDescendants()) do
+                if effect.Name == "DarkForgeNightVisionColor" then effect:Destroy() end
+            end
+            -- Door highlights are also tinted green by Nightvision; remove them if Door ESP is off,
+            -- otherwise immediately restore the user's normal Door ESP palette.
+            for target, h in pairs(doorHighlights) do
+                if not doorESP then
+                    if h then h:Destroy() end
+                    doorHighlights[target] = nil
+                elseif h and h.Parent then
+                    h.Name = "DarkForgeDoorESPHighlight"
+                    h.FillColor = doorColor
+                    h.OutlineColor = Color3.new(0, 0, 0)
+                    h.FillTransparency = doorFillTrans
+                    h.OutlineTransparency = doorOutlineTrans
+                end
+            end
+            -- Remove any Nightvision-only door highlight, even if the tracking table was stale.
+            if not doorESP then
+                for target, h in pairs(doorHighlights) do
+                    if h then h:Destroy() end
+                    doorHighlights[target] = nil
+                end
+            end
+            -- Remove any orphaned Nightvision highlights left by an interrupted toggle.
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Highlight") and (obj.Name == "DarkForgeNightVisionHighlight" or obj.Name == "DarkForgeNightVisionDoorHighlight") then
+                    obj:Destroy()
+                end
+            end
+            if nightVisionPrevious then
+                highlightESP=nightVisionPrevious.highlightESP; tracersESP=nightVisionPrevious.tracersESP
+                boxESP=nightVisionPrevious.boxESP
+                statESP=nightVisionPrevious.statESP
+                nightVisionPrevious=nil
+            end
+        end
+    end)
+    createRangeSlider(pageVisions, "Nightvision range", 50, 1000, nightVisionRange, 10, function(v) nightVisionRange = v end)
+    createRangeSlider(pageVisions, "Box ESP range", 50, 1000, boxESPRange, 10, function(v) boxESPRange = v end)
+    divider(pageVisions, "Whitelist Players")
+    local whitelistBox = create("TextBox", {Size=UDim2.new(1,0,0,30), BackgroundColor3=BG3, Text="", PlaceholderText="Username or display name", TextColor3=TEXT, PlaceholderColor3=MUTED, Font=Enum.Font.Code, TextSize=12, ClearTextOnFocus=false}, pageVisions)
+    corner(whitelistBox,6)
+    createBtn(pageVisions, "Add to Whitelist", function()
+        if setPlayerListEntry(whitelistPlayers, whitelistBox.Text, true) then whitelistBox.Text="" end
+    end)
+    createBtn(pageVisions, "Remove from Whitelist", function()
+        setPlayerListEntry(whitelistPlayers, whitelistBox.Text, false); whitelistBox.Text=""
+    end)
+    divider(pageVisions, "Blacklist Players")
+    local blacklistBox = create("TextBox", {Size=UDim2.new(1,0,0,30), BackgroundColor3=BG3, Text="", PlaceholderText="Username or display name", TextColor3=TEXT, PlaceholderColor3=MUTED, Font=Enum.Font.Code, TextSize=12, ClearTextOnFocus=false}, pageVisions)
+    corner(blacklistBox,6)
+    createBtn(pageVisions, "Add to Blacklist", function()
+        if setPlayerListEntry(blacklistPlayers, blacklistBox.Text, true) then blacklistBox.Text="" end
+    end)
+    createBtn(pageVisions, "Remove from Blacklist", function()
+        setPlayerListEntry(blacklistPlayers, blacklistBox.Text, false); blacklistBox.Text=""
+    end)
+    createSwitch(pageVisions, "Whitelist / Blacklist filter", false, function(state) listFilterEnabled = state end)
+    divider(pageVisions, "Whitelist Color")
+    createColorSlider(pageVisions, "Whitelist", whitelistColor, function(c) whitelistColor = c end)
+    createTransSlider(pageVisions, "WL Fill Trans", wlFillTrans, function(v) wlFillTrans = v end)
+    createTransSlider(pageVisions, "WL Outline Trans", wlOutlineTrans, function(v) wlOutlineTrans = v end)
+    divider(pageVisions, "Blacklist Color")
+    createColorSlider(pageVisions, "Blacklist", blacklistColor, function(c) blacklistColor = c end)
+    createTransSlider(pageVisions, "BL Fill Trans", blFillTrans, function(v) blFillTrans = v end)
+    createTransSlider(pageVisions, "BL Outline Trans", blOutlineTrans, function(v) blOutlineTrans = v end)
+    divider(pageVisions, "Door Color")
+    createColorSlider(pageVisions, "Door ESP", doorColor, function(c) doorColor = c end)
+    createTransSlider(pageVisions, "Door Fill Trans", doorFillTrans, function(v) doorFillTrans = v end)
+    createTransSlider(pageVisions, "Door Outline Trans", doorOutlineTrans, function(v) doorOutlineTrans = v end)
+    --------------------------------------------------------------------
+    -- EFFECTS
+    --------------------------------------------------------------------
+    divider(pageEffects, "player effects")
+    createSwitch(pageEffects, "the rain", false, function(state)
+        setPlayerEffect("rain", state)
+    end)
+    createSwitch(pageEffects, "Anime", false, function(state)
+        setPlayerEffect("anime", state)
+    end)
+    createSwitch(pageEffects, "rage", false, function(state)
+        setPlayerEffect("rage", state)
+    end)
+    createSwitch(pageEffects, "roaring", false, function(state)
+        setPlayerEffect("roaring", state)
+    end)
+    divider(pageEffects, "World effects")
+    createSwitch(pageEffects, "Anime (World)", false, function(state)
+        setWorldAnime(state)
+    end)
+
+    --------------------------------------------------------------------
+    -- PLAYER
+    --------------------------------------------------------------------
+    local speedBox = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = BG3,
+        Text = "16",
+        PlaceholderText = "WalkSpeed",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Code,
+        TextSize = 14
+    }, pagePlayer)
+    corner(speedBox, 6)
+    createSwitch(pagePlayer, "Enable Speed", false, function(s)
+        speedEnabled = s
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = s and (tonumber(speedBox.Text) or 16) or 16
+        end
+    end)
+    local tpBox = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = BG3,
+        Text = "1.2",
+        PlaceholderText = "TP Walk Power",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Code,
+        TextSize = 14
+    }, pagePlayer)
+    corner(tpBox, 6)
+    tpBox.FocusLost:Connect(function()
+        tpWalkPower = tonumber(tpBox.Text) or 1.2
+    end)
+    createSwitch(pagePlayer, "TP Walk", false, function(s)
+        tpWalkEnabled = s
+    end)
+    --------------------------------------------------------------------
+    -- SETTINGS
+    --------------------------------------------------------------------
+    divider(pageSettings, "Tab Sorting")
+    local selectedSortTab = 1
+    local sortTabLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1,
+        Text = "Selected tab: " .. tabOrder[selectedSortTab], TextColor3 = TEXT,
+        Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left
+    }, pageSettings)
+    local sortControls = create("Frame", {Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1}, pageSettings)
+    local sortPrev = create("TextButton", {Size = UDim2.new(0.32, -4, 1, 0), Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = BG3, Text = "Next Tab", TextColor3 = TEXT, Font = Enum.Font.Gotham, TextSize = 12}, sortControls)
+    local sortLeft = create("TextButton", {Size = UDim2.new(0.32, -4, 1, 0), Position = UDim2.new(0.34, 0, 0, 0), BackgroundColor3 = BG3, Text = "Move Left", TextColor3 = TEXT, Font = Enum.Font.Gotham, TextSize = 12}, sortControls)
+    local sortRight = create("TextButton", {Size = UDim2.new(0.32, -4, 1, 0), Position = UDim2.new(0.68, 0, 0, 0), BackgroundColor3 = BG3, Text = "Move Right", TextColor3 = TEXT, Font = Enum.Font.Gotham, TextSize = 12}, sortControls)
+    for _, b in ipairs({sortPrev, sortLeft, sortRight}) do corner(b, 6) end
+    local function refreshTabSort()
+        sortTabLabel.Text = "Selected tab: " .. tabOrder[selectedSortTab] .. "  (" .. selectedSortTab .. "/" .. #tabOrder .. ")"
+    end
+    local function applyTabOrder()
+        for index, tabName in ipairs(tabOrder) do
+            local data = tabs[tabName]
+            if data and data.btn then data.btn.LayoutOrder = index end
+        end
+        refreshTabSort()
+    end
+    sortPrev.MouseButton1Click:Connect(function()
+        selectedSortTab = selectedSortTab % #tabOrder + 1
+        refreshTabSort()
+    end)
+    sortLeft.MouseButton1Click:Connect(function()
+        if selectedSortTab > 1 then
+            tabOrder[selectedSortTab], tabOrder[selectedSortTab - 1] = tabOrder[selectedSortTab - 1], tabOrder[selectedSortTab]
+            selectedSortTab -= 1
+            applyTabOrder()
+        end
+    end)
+    sortRight.MouseButton1Click:Connect(function()
+        if selectedSortTab < #tabOrder then
+            tabOrder[selectedSortTab], tabOrder[selectedSortTab + 1] = tabOrder[selectedSortTab + 1], tabOrder[selectedSortTab]
+            selectedSortTab += 1
+            applyTabOrder()
+        end
+    end)
+    divider(pageSettings, "UI Color")
+    createColorSlider(pageSettings, "Accent Color", currentAccent, function(c)
+        applyAccent(c)
+    end)
+    --------------------------------------------------------------------
+    -- FUN + GEPPO
+    --------------------------------------------------------------------
+    local geppoDrop = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = BG2,
+        ClipsDescendants = true,
+        Visible = false
+    }, pageFun)
+    corner(geppoDrop, 8)
+    create("UIListLayout", {Padding = UDim.new(0, 6)}, geppoDrop)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 8)
+    }, geppoDrop)
+    local infBtn = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = BG3,
+        Text = "Infinite Jumps",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Gotham,
+        TextSize = 13
+    }, geppoDrop)
+    corner(infBtn, 6)
+    local setBtn = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = BG3,
+        Text = "Set Number",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Gotham,
+        TextSize = 13
+    }, geppoDrop)
+    corner(setBtn, 6)
+    local numBox = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundColor3 = BG3,
+        Text = "3",
+        TextColor3 = TEXT,
+        Font = Enum.Font.Code,
+        TextSize = 13,
+        Visible = false
+    }, geppoDrop)
+    corner(numBox, 6)
+    numBox.FocusLost:Connect(function()
+        geppoMaxJumps = math.clamp(tonumber(numBox.Text) or 3, 1, 50)
+    end)
+    infBtn.MouseButton1Click:Connect(function()
+        playSound(SOUND_NORMAL)
+        geppoInfinite = true
+        numBox.Visible = false
+    end)
+    setBtn.MouseButton1Click:Connect(function()
+        playSound(SOUND_NORMAL)
+        geppoInfinite = false
+        numBox.Visible = true
+    end)
+    createSwitch(pageFun, "Geppo (Multi-jump)", false, function(s)
+        geppoEnabled = s
+        geppoCurrent = 0
+        if s then
+            geppoDrop.Visible = true
+            TweenService:Create(geppoDrop, TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, 110)}):Play()
+        else
+            TweenService:Create(geppoDrop, TweenInfo.new(0.2), {Size = UDim2.new(1, 0, 0, 0)}):Play()
+            task.delay(0.22, function()
+                if not geppoEnabled then
+                    geppoDrop.Visible = false
+                    numBox.Visible = false
+                end
+            end)
+        end
+    end)
+    createSwitch(pageFun, "Flashstep (Replica Movement)", false, function(state)
+        setFlashstep(state)
+    end)
+    createSwitch(pageFun, "Blindness", false, function(state)
+        setBlindness(state)
+    end)
+    create("TextLabel", {Size=UDim2.new(1,0,0,34), BackgroundTransparency=1, Text="Blindness: nearby visible surfaces are revealed in gray up to 220 studs; moving players appear blue and NPCs green.", TextColor3=MUTED, Font=Enum.Font.Code, TextSize=10, TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Left}, pageFun)
+    createRangeSlider(pageFun, "Flashstep travel zone", 20, 500, flashstepRange, 10, function(v) flashstepRange = v end)
+    create("TextLabel", {Size=UDim2.new(1,0,0,42), BackgroundTransparency=1, Text="PC: WASD move • Space/Ctrl rise and descend\nConsole: Left Stick move • A/B rise and descend", TextColor3=MUTED, Font=Enum.Font.Code, TextSize=11, TextWrapped=true, TextXAlignment=Enum.TextXAlignment.Left}, pageFun)
+    --------------------------------------------------------------------
+    -- UPDATE LOG
+    --------------------------------------------------------------------
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1,
+        Text = "Ω V0IDZ HUB Ω  |  VERSION " .. VERSION,
+        TextColor3 = currentAccent, Font = Enum.Font.GothamBold, TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, pageLog)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 210), BackgroundTransparency = 1,
+        Text = "Welcome to Ω V0IDZ HUB Ω v" .. VERSION .. "\n\n" ..
+            "• Added Rejoin Server and Server Hop controls to General.\n" ..
+            "• Added tab sorting controls in Settings. Select a tab, then move it left or right.\n" ..
+            "• Update Log is now the first tab.\n" ..
+            "• Added a separate startup Update Log window. The main interface opens only after it is closed.\n" ..
+            "• Improved startup flow and kept existing features in place.",
+        TextColor3 = TEXT, Font = Enum.Font.Gotham, TextSize = 12,
+        TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, pageLog)
+    --------------------------------------------------------------------
+    -- HEARTBEAT + RENDER
+    --------------------------------------------------------------------
+    addConn(UserInputService.JumpRequest:Connect(function()
+        if not geppoEnabled then return end
+        local now = os.clock()
+        if now - lastGeppoAt < GEPPO_COOLDOWN then return end
+        local char = player.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.FloorMaterial ~= Enum.Material.Air then return end
+        if not geppoInfinite and geppoCurrent >= geppoMaxJumps then return end
+        lastGeppoAt = now
+        geppoCurrent += 1
+        createGeppoBurst(root)
+        root.AssemblyLinearVelocity = Vector3.new(root.AssemblyLinearVelocity.X, 85, root.AssemblyLinearVelocity.Z)
+        playSound(SOUND_GEPPO_JUMP)
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            local anim = Instance.new("Animation")
+            anim.AnimationId = GEPPO_ANIM_ID
+            local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+            if ok and track then
+                track.Priority = Enum.AnimationPriority.Action4
+                track:Play()
+                track:AdjustSpeed(1.22)
+                track.TimePosition = 0.45
+                task.delay((1.87 - 0.45) / 1.22, function() track:Stop() end)
+            end
+        end
+    end))
+    addConn(UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.J and flightEnabled and not flashstepEnabled then
+            flightBoost = not flightBoost
+            sprinting = flightBoost
+            if flightBoost then playSound(SOUND_SPRINT) end
+        elseif input.KeyCode == Enum.KeyCode.ButtonB and flightEnabled and not flashstepEnabled then
+            flightBoost = not flightBoost
+            sprinting = flightBoost
+            if flightBoost then playSound(SOUND_SPRINT) end
+        end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or (input.KeyCode == Enum.KeyCode.ButtonB and not flightEnabled) then
+            holdingActivate = true
+        end
+    end))
+    addConn(UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.KeyCode == Enum.KeyCode.ButtonB then
+            holdingActivate = false
+        end
+    end))
+    -- Native ScreenGui ESP: client-only and compatible with a normal LocalScript.
+    ensureESPGui()
+    addConn(player.CharacterAdded:Connect(function()
+        task.wait(0.65)
+        refreshPlayerEffects()
+    end))
+    local nextESPUpdate = 0
+    local staticBatchIndex = 1
+    addConn(RunService.RenderStepped:Connect(function()
+        if not espGui or not espGui.Parent then return end
+        local nowClock = os.clock()
+        if nowClock < nextESPUpdate then return end
+        nextESPUpdate = nowClock + (1/30)
+        local camera=workspace.CurrentCamera
+        if not camera then return end
+        if nightVisionESP and nowClock >= nextStaticUpdate then
+            nextStaticUpdate = nowClock + 0.075
+            local staticLayer=espGui:FindFirstChild("NVStaticLayer")
+            if staticLayer and staticLayer.Visible then
+                local pixels = staticLayer:GetChildren()
+                local total = #pixels
+                -- Animate only a small rotating batch each update to avoid hundreds
+                -- of property writes every frame while keeping the noise chaotic.
+                for offset = 0, math.min(17, total-1) do
+                    local index = ((staticBatchIndex + offset - 1) % math.max(total,1)) + 1
+                    local px = pixels[index]
+                    if px and px:IsA("Frame") then
+                        px.Position=UDim2.fromScale(math.random(), math.random())
+                        px.Size=UDim2.fromOffset(math.random(1,5), math.random(1,4))
+                        px.BackgroundColor3=(math.random() > 0.35) and Color3.fromRGB(155,255,180) or Color3.fromRGB(225,255,230)
+                        px.BackgroundTransparency=math.random(5,32)/100
+                        px.Visible=(math.random() > 0.025)
+                    end
+                end
+                staticBatchIndex = ((staticBatchIndex + 18 - 1) % math.max(total,1)) + 1
+            end
+        end
+        local myChar=player.Character
+        local myRoot=myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myHum=myChar and myChar:FindFirstChildOfClass("Humanoid")
+        local tracked=0
+        for _, targetPlayer in ipairs(Players:GetPlayers()) do
+            if targetPlayer~=player then
+                local character=targetPlayer.Character
+                local targetRoot=character and character:FindFirstChild("HumanoidRootPart")
+                local targetHum=character and character:FindFirstChildOfClass("Humanoid")
+                if targetRoot and targetHum and targetHum.Health>0 then
+                    local distance=myRoot and (targetRoot.Position-myRoot.Position).Magnitude or math.huge
+                    local nvInRange = nightVisionESP and distance <= nightVisionRange
+                    local boxInRange = boxESP and distance <= boxESPRange
+                    local blockedByList = listFilterEnabled and isBlacklisted(targetPlayer)
+                    local inRange = (nvInRange or boxInRange or statESP or tracersESP) and not blockedByList
+                    if nvInRange and not blockedByList then tracked+=1 end
+                    local active=(boxESP or tracersESP or statESP or nightVisionESP) and inRange
+                    if active then
+                        local data=espObjects[targetPlayer] or makeESPObject(targetPlayer)
+                        if data then
+                            espObjects[targetPlayer]=data
+                            local top,topOn=camera:WorldToViewportPoint(targetRoot.Position+Vector3.new(0,3.2,0))
+                            local bottom,bottomOn=camera:WorldToViewportPoint(targetRoot.Position-Vector3.new(0,3,0))
+                            local visible=topOn and bottomOn and top.Z>0 and bottom.Z>0
+                            if visible then
+                                local height=math.clamp(math.abs(bottom.Y-top.Y),24,camera.ViewportSize.Y*.9)
+                                local width=height*.48
+                                local x=(top.X+bottom.X)*.5; local y=(top.Y+bottom.Y)*.5
+                                local color=nightVisionESP and Color3.fromRGB(225,255,230) or (boxESP and Color3.new(1,1,1) or getESPColor(targetPlayer))
+                                local boxAllowed = nvInRange or boxInRange or (statESP and not boxESP and not nightVisionESP)
+                                local now = os.clock()
+                                local jitter = boxJitterCache[targetPlayer]
+                                if nvInRange and (not jitter or now - jitter.time >= 0.045) then
+                                    jitter = {time=now, x=x, y=y, dx=math.random(-5,5), dy=math.random(-5,5)}
+                                    boxJitterCache[targetPlayer] = jitter
+                                end
+                                local boxX = (nvInRange and jitter and jitter.x) or x
+                                local boxY = (nvInRange and jitter and jitter.y) or y
+                                local jitterX = (nvInRange and jitter and jitter.dx) or 0
+                                local jitterY = (nvInRange and jitter and jitter.dy) or 0
+                                data.box.Position=UDim2.fromOffset(boxX-width/2+jitterX,boxY-height/2+jitterY)
+                                data.box.Size=UDim2.fromOffset(width,height)
+                                data.box.Visible=boxAllowed
+                                data.stroke.Enabled=boxAllowed
+                                data.stroke.Color=color; data.stroke.Thickness=nightVisionESP and 2 or 1.5
+                                data.name.Text=targetPlayer.DisplayName
+                                data.name.TextColor3=nightVisionESP and Color3.fromRGB(205,255,215) or TEXT
+                                data.name.Visible=nvInRange or statESP
+                                local ratio=math.clamp(targetHum.Health/math.max(targetHum.MaxHealth,1),0,1)
+                                data.hpBack.Visible=nvInRange
+                                data.hpFill.Size=UDim2.new(1,0,ratio,0)
+                                data.hpFill.BackgroundColor3=ratio>.6 and Color3.fromRGB(85,255,135) or (ratio>.3 and Color3.fromRGB(245,210,80) or Color3.fromRGB(255,90,90))
+                                data.stats.Text=string.format("%d / %d HP",math.ceil(targetHum.Health),math.ceil(targetHum.MaxHealth))
+                                data.stats.Visible=nvInRange or statESP
+                                data.tracer.Visible=false
+                                if tracersESP and not nightVisionESP and myRoot and not blockedByList then
+                                    local targetPoint,targetOn=camera:WorldToViewportPoint(targetRoot.Position)
+                                    local origin=Vector2.new(camera.ViewportSize.X*0.5,camera.ViewportSize.Y-4)
+                                    local destination=Vector2.new(targetPoint.X,targetPoint.Y)
+                                    local delta=destination-origin
+                                    data.tracer.Position=UDim2.fromOffset(origin.X,origin.Y)
+                                    data.tracer.Size=UDim2.fromOffset(delta.Magnitude,2)
+                                    data.tracer.Rotation=math.deg(math.atan2(delta.Y,delta.X))
+                                    data.tracer.BackgroundColor3=getESPColor(targetPlayer)
+                                    data.tracer.Visible=targetOn and targetPoint.Z>0
+                                end
+                            else
+                                data.box.Visible=false; data.name.Visible=false; data.hpBack.Visible=false
+                                data.stats.Visible=false; data.tracer.Visible=false
+                            end
+                        end
+                    elseif espObjects[targetPlayer] then
+                        local d=espObjects[targetPlayer]
+                        d.box.Visible=false; d.name.Visible=false; d.hpBack.Visible=false; d.stats.Visible=false; d.tracer.Visible=false
+                    end
+                    local shouldHighlight = (nvInRange or highlightESP) and not blockedByList
+                    if shouldHighlight then
+                        local h=playerHighlights[targetPlayer]
+                        if not h or not h.Parent then
+                            h=Instance.new("Highlight"); h.Name=nvInRange and "DarkForgeNightVisionHighlight" or "DarkForgePlayerHighlight"
+                            h.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; h.Parent=character
+                            playerHighlights[targetPlayer]=h
+                        end
+                        h.Adornee=character
+                        if nvInRange then
+                            h.FillColor=Color3.fromRGB(70,220,105); h.OutlineColor=Color3.fromRGB(175,255,190)
+                            h.FillTransparency=.48; h.OutlineTransparency=.08
+                        else
+                            local isBlacklistedPlayer=playerListContains(blacklistPlayers,targetPlayer)
+                            h.FillColor=getESPColor(targetPlayer); h.OutlineColor=Color3.new(0,0,0)
+                            h.FillTransparency=isBlacklistedPlayer and blFillTrans or wlFillTrans
+                            h.OutlineTransparency=isBlacklistedPlayer and blOutlineTrans or wlOutlineTrans
+                        end
+                    else
+                        local h=playerHighlights[targetPlayer]
+                        if h then h:Destroy(); playerHighlights[targetPlayer]=nil end
+                    end
+                else
+                    removePlayerESP(targetPlayer)
+                end
+            end
+        end
+        -- Nearby NPCs receive the same visual ESP modes as players, in green.
+        if myRoot and (highlightESP or boxESP or tracersESP or statESP or nightVisionESP) then
+            if nowClock - npcLastScan >= 1.0 then
+                npcLastScan = nowClock
+                local found = {}
+                local scanRange = math.max(350, nightVisionRange, boxESPRange)
+                -- Discover NPCs by their Humanoids, not by a capped nearby-parts query.
+                -- Large maps can otherwise fill the query with scenery before it reaches a Dummy.
+                for _, descendant in ipairs(workspace:GetDescendants()) do
+                    if descendant:IsA("Humanoid") and descendant.Health > 0 then
+                        local model = descendant.Parent
+                        while model and not model:IsA("Model") do model = model.Parent end
+                        if model and model ~= myChar and not Players:GetPlayerFromCharacter(model) then
+                            local npcRoot = getNPCRoot(model)
+                            if npcRoot and (npcRoot.Position - myRoot.Position).Magnitude <= scanRange then
+                                found[model] = true
+                            end
+                        end
+                    end
+                end
+                for oldModel in pairs(npcTargetModels) do
+                    if not found[oldModel] then removePlayerESP(oldModel) end
+                end
+                npcTargetModels = found
+            end
+            local seenNPC = {}
+            for model in pairs(npcTargetModels) do
+                if model.Parent then
+                    local hum = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true)
+                    local npcRoot = getNPCRoot(model)
+                    if hum and npcRoot and hum.Health > 0 then
+                        local distance = (npcRoot.Position - myRoot.Position).Magnitude
+                        local nvInRange = nightVisionESP and distance <= nightVisionRange
+                        local boxInRange = boxESP and distance <= boxESPRange
+                        local active = nvInRange or boxInRange or highlightESP or tracersESP or statESP
+                        if active then
+                            seenNPC[model] = true
+                            local data = espObjects[model] or makeESPObject(model)
+                            if data then
+                                espObjects[model] = data
+                                local top, topOn = camera:WorldToViewportPoint(npcRoot.Position + Vector3.new(0, 3.2, 0))
+                                local bottom, bottomOn = camera:WorldToViewportPoint(npcRoot.Position - Vector3.new(0, 3, 0))
+                                local visible = topOn and bottomOn and top.Z > 0 and bottom.Z > 0
+                                if visible then
+                                    local height = math.clamp(math.abs(bottom.Y - top.Y), 24, camera.ViewportSize.Y * 0.9)
+                                    local width = height * 0.48
+                                    local x, y = (top.X + bottom.X) * 0.5, (top.Y + bottom.Y) * 0.5
+                                    local color = Color3.fromRGB(70, 255, 110)
+                                    local boxAllowed = nvInRange or boxInRange or (statESP and not boxESP and not nightVisionESP)
+                                    local jitter = boxJitterCache[model]
+                                    if nvInRange and (not jitter or nowClock - jitter.time >= 0.045) then
+                                        jitter = {time=nowClock, x=x, y=y, dx=math.random(-5,5), dy=math.random(-5,5)}
+                                        boxJitterCache[model] = jitter
+                                    end
+                                    local boxX = (nvInRange and jitter and jitter.x) or x
+                                    local boxY = (nvInRange and jitter and jitter.y) or y
+                                    data.box.Position = UDim2.fromOffset(boxX - width/2 + ((nvInRange and jitter and jitter.dx) or 0), boxY - height/2 + ((nvInRange and jitter and jitter.dy) or 0))
+                                    data.box.Size = UDim2.fromOffset(width, height)
+                                    data.box.Visible = boxAllowed
+                                    data.stroke.Enabled = boxAllowed
+                                    data.stroke.Color = color
+                                    data.stroke.Thickness = nightVisionESP and 2 or 1.5
+                                    data.name.Text = model.Name
+                                    data.name.TextColor3 = Color3.fromRGB(125, 255, 155)
+                                    data.name.Visible = nvInRange or statESP
+                                    local ratio = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                                    data.hpBack.Visible = nvInRange
+                                    data.hpFill.Size = UDim2.new(1, 0, ratio, 0)
+                                    data.hpFill.BackgroundColor3 = color
+                                    data.stats.Text = string.format("%d / %d HP", math.ceil(hum.Health), math.ceil(hum.MaxHealth))
+                                    data.stats.TextColor3 = Color3.fromRGB(125, 255, 155)
+                                    data.stats.Visible = nvInRange or statESP
+                                    data.tracer.Visible = false
+                                    if tracersESP and not nightVisionESP then
+                                        local point, onScreen = camera:WorldToViewportPoint(npcRoot.Position)
+                                        local origin = Vector2.new(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y - 4)
+                                        local delta = Vector2.new(point.X, point.Y) - origin
+                                        data.tracer.Position = UDim2.fromOffset(origin.X, origin.Y)
+                                        data.tracer.Size = UDim2.fromOffset(delta.Magnitude, 2)
+                                        data.tracer.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+                                        data.tracer.BackgroundColor3 = color
+                                        data.tracer.Visible = onScreen and point.Z > 0
+                                    end
+                                else
+                                    data.box.Visible = false; data.name.Visible = false
+                                    data.hpBack.Visible = false; data.stats.Visible = false; data.tracer.Visible = false
+                                end
+                            end
+                        end
+                        local shouldHighlight = highlightESP or nvInRange
+                        if shouldHighlight then
+                            local h = playerHighlights[model]
+                            if not h or not h.Parent then
+                                h = Instance.new("Highlight")
+                                h.Name = "DarkForgeNPCEspHighlight"
+                                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                h.Parent = model
+                                playerHighlights[model] = h
+                            end
+                            h.Adornee = model
+                            h.FillColor = Color3.fromRGB(45, 220, 85)
+                            h.OutlineColor = Color3.fromRGB(160, 255, 180)
+                            h.FillTransparency = nvInRange and 0.42 or wlFillTrans
+                            h.OutlineTransparency = nvInRange and 0.04 or wlOutlineTrans
+                        else
+                            local h = playerHighlights[model]
+                            if h then h:Destroy(); playerHighlights[model] = nil end
+                        end
+                    end
+                end
+            end
+            for model in pairs(npcTargetModels) do
+                if not seenNPC[model] then
+                    local data = espObjects[model]
+                    if data then
+                        data.box.Visible = false; data.name.Visible = false
+                        data.hpBack.Visible = false; data.stats.Visible = false; data.tracer.Visible = false
+                    end
+                    local h = playerHighlights[model]
+                    if h then h:Destroy(); playerHighlights[model] = nil end
+                end
+            end
+        else
+            for model in pairs(npcTargetModels) do removePlayerESP(model) end
+            table.clear(npcTargetModels)
+        end
+        if nightVisionESP and nightVisionHud then
+            local hp=myHum and myHum.Health or 0; local maxHp=myHum and myHum.MaxHealth or 100
+            local label=nightVisionHud:FindFirstChild("LocalHealthText")
+            local back=nightVisionHud:FindFirstChild("LocalHealthBack")
+            local fill=back and back:FindFirstChild("LocalHealthFill")
+            local nearby=nightVisionHud:FindFirstChild("NearbyText")
+            if label then label.Text=string.format("VITALS %03d / %03d",math.ceil(hp),math.ceil(maxHp)) end
+            if fill then fill.Size=UDim2.new(math.clamp(hp/math.max(maxHp,1),0,1),0,1,0) end
+            if nearby then nearby.Text=string.format("TRACKED: %d // RANGE: %dM",tracked,nightVisionRange) end
+        end
+    end))
+    addConn(Players.PlayerRemoving:Connect(function(p) removePlayerESP(p) end))
+    addConn(RunService.RenderStepped:Connect(function()
+        if not blindnessEnabled or not blindnessWorldFolder then return end
+        local now = os.clock()
+        if now - blindnessLastScan < 0.25 then return end
+        blindnessLastScan = now
+        local character = player.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        if not blindnessLocalHighlight or not blindnessLocalHighlight.Parent or blindnessLocalHighlight.Adornee ~= character then
+            if blindnessLocalHighlight then blindnessLocalHighlight:Destroy() end
+            blindnessLocalHighlight = Instance.new("Highlight")
+            blindnessLocalHighlight.Name = "BlindnessLocalPlayerWhite"
+            blindnessLocalHighlight.Adornee = character
+            blindnessLocalHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            blindnessLocalHighlight.FillColor = Color3.new(1, 1, 1)
+            blindnessLocalHighlight.OutlineColor = Color3.new(1, 1, 1)
+            blindnessLocalHighlight.FillTransparency = 0
+            blindnessLocalHighlight.OutlineTransparency = 0
+            blindnessLocalHighlight.Parent = character
+        end
+
+        -- Sample a dense grid across the actual camera view. This places many small
+        -- non-collidable light points on the visible face of nearby blocks instead
+        -- of scattering a few dots in every direction around the character.
+        blindnessRayParams.FilterDescendantsInstances = {character, blindnessWorldFolder}
+        local markerIndex = 0
+        local camera = workspace.CurrentCamera
+        local columns, rows = 24, 18
+        if camera then
+            local viewport = camera.ViewportSize
+            for row = 1, rows do
+                for column = 1, columns do
+                    local px = (column - 0.5) / columns * viewport.X
+                    local py = (row - 0.5) / rows * viewport.Y
+                    local viewRay = camera:ViewportPointToRay(px, py)
+                    local result = workspace:Raycast(viewRay.Origin, viewRay.Direction * blindnessRange, blindnessRayParams)
+                    if result and result.Instance and result.Instance:IsA("BasePart") then
+                        local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+                        if not (hitModel and hitModel:FindFirstChildOfClass("Humanoid")) then
+                            markerIndex += 1
+                            local marker = blindnessSurfaceMarkers[markerIndex]
+                            if marker then
+                                local distance = (result.Position - root.Position).Magnitude
+                                local brightness = math.clamp(1 - (distance / blindnessRange) * 0.62, 0.28, 1)
+                                local size = 0.85 + brightness * 0.65
+                                marker.Color = Color3.new(brightness, brightness, brightness)
+                                marker.Size = Vector3.new(size, size, size)
+                                marker.CFrame = CFrame.new(result.Position + result.Normal * 0.045)
+                                marker.Transparency = 0.015
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        local rayCount = #blindnessSurfaceMarkers
+        for i = markerIndex + 1, rayCount do
+            local marker = blindnessSurfaceMarkers[i]
+            if marker then marker.Transparency = 1 end
+        end
+
+        local overlap = OverlapParams.new()
+        overlap.FilterType = Enum.RaycastFilterType.Exclude
+        overlap.FilterDescendantsInstances = {character, blindnessWorldFolder}
+        overlap.MaxParts = 0
+        local seenModels = {}
+        for _, part in ipairs(workspace:GetPartBoundsInRadius(root.Position, blindnessRange, overlap)) do
+            local model = part:FindFirstAncestorOfClass("Model")
+            if model and model ~= character then
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                local modelRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+                if hum and hum.Health > 0 and modelRoot and (modelRoot.Position-root.Position).Magnitude <= blindnessRange then
+                    local targetPlayer = Players:GetPlayerFromCharacter(model)
+                    local show, fill, outline
+                    if targetPlayer then
+                        show = modelRoot.AssemblyLinearVelocity.Magnitude > 0.65
+                        fill, outline = Color3.fromRGB(35, 115, 255), Color3.fromRGB(135, 195, 255)
+                    else
+                        show = true
+                        fill, outline = Color3.fromRGB(30, 220, 85), Color3.fromRGB(150, 255, 175)
+                    end
+                    if show then
+                        seenModels[model] = true
+                        local h = blindnessPlayerHighlights[model]
+                        if not h or not h.Parent then
+                            h = Instance.new("Highlight")
+                            h.Name = targetPlayer and "BlindnessMovingPlayerHighlight" or "BlindnessNPCGreenHighlight"
+                            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            h.Parent = blindnessWorldFolder
+                            blindnessPlayerHighlights[model] = h
+                        end
+                        h.Adornee = model
+                        h.FillColor = fill
+                        h.OutlineColor = outline
+                        h.FillTransparency = targetPlayer and 0.18 or 0.12
+                        h.OutlineTransparency = 0
+                    end
+                end
+            end
+        end
+        for model, h in pairs(blindnessPlayerHighlights) do
+            if not seenModels[model] or not model.Parent then
+                h:Destroy()
+                blindnessPlayerHighlights[model] = nil
+            end
+        end
+    end))
+
+    addConn(RunService.Heartbeat:Connect(function(dt)
+        if not thermalVisionESP or not thermalFolder then return end
+        local now = os.clock()
+        if now - thermalLastScan < 0.5 then return end
+        thermalLastScan = now
+        local char = player.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local overlap = OverlapParams.new()
+        overlap.FilterType = Enum.RaycastFilterType.Exclude
+        overlap.FilterDescendantsInstances = {char, thermalFolder}
+        overlap.MaxParts = 80
+        local seen, seenModels = {}, {}
+        for _, part in ipairs(workspace:GetPartBoundsInRadius(root.Position, 320, overlap)) do
+            if part:IsA("BasePart") and part.Transparency < 0.95 then
+                local model = part:FindFirstAncestorOfClass("Model")
+                local hum = model and model:FindFirstChildOfClass("Humanoid")
+                local targetPlayer = hum and Players:GetPlayerFromCharacter(model)
+                if not hum then
+                    local h = thermalHighlights[part]
+                    if not h or not h.Parent then
+                        h = Instance.new("Highlight")
+                        h.Name = "ThermalBlueEnvironment"
+                        h.Adornee = part
+                        h.DepthMode = Enum.HighlightDepthMode.Occluded
+                        h.Parent = thermalFolder
+                        thermalHighlights[part] = h
+                    end
+                    h.FillColor = Color3.fromRGB(18, 78, 210)
+                    h.OutlineColor = Color3.fromRGB(65, 180, 255)
+                    h.FillTransparency = 0.42
+                    h.OutlineTransparency = 0.12
+                    seen[part] = true
+                elseif model ~= char and not seenModels[model] then
+                    seenModels[model] = true
+                    local modelRoot = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:FindFirstChild("Torso") or model:FindFirstChild("UpperTorso")
+                    local speedHeat = math.clamp((modelRoot and modelRoot.AssemblyLinearVelocity.Magnitude or 0) / 22, 0, 1)
+                    for _, bodyPart in ipairs(model:GetDescendants()) do
+                        if bodyPart:IsA("BasePart") and bodyPart.Name ~= "HumanoidRootPart" then
+                            local h = thermalHighlights[bodyPart]
+                            if not h or not h.Parent then
+                                h = Instance.new("Highlight")
+                                h.Name = targetPlayer and "ThermalPlayerHeatCell" or "ThermalNPCHeatCell"
+                                h.Adornee = bodyPart
+                                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                                h.Parent = thermalFolder
+                                thermalHighlights[bodyPart] = h
+                            end
+                            if targetPlayer then
+                                -- Per-part heat variation gives a thermal-camera ramp instead
+                                -- of one flat orange fill across the entire character.
+                                local partName = bodyPart.Name:lower()
+                                local localHeat = 0.52 + speedHeat * 0.28
+                                if partName:find("head") then
+                                    localHeat += 0.18
+                                elseif partName:find("torso") then
+                                    localHeat += 0.10
+                                elseif partName:find("hand") or partName:find("foot") then
+                                    localHeat -= 0.16
+                                end
+                                localHeat = math.clamp(localHeat, 0, 1)
+                                local cold = Color3.fromRGB(28, 60, 210)
+                                local cyan = Color3.fromRGB(0, 225, 255)
+                                local orange = Color3.fromRGB(255, 105, 20)
+                                local white = Color3.fromRGB(255, 250, 220)
+                                local heatColor
+                                if localHeat < 0.45 then
+                                    heatColor = cold:Lerp(cyan, localHeat / 0.45)
+                                elseif localHeat < 0.82 then
+                                    heatColor = cyan:Lerp(orange, (localHeat - 0.45) / 0.37)
+                                else
+                                    heatColor = orange:Lerp(white, (localHeat - 0.82) / 0.18)
+                                end
+                                h.FillColor = heatColor
+                                h.OutlineColor = heatColor:Lerp(Color3.new(1,1,1), 0.55)
+                                h.FillTransparency = 0.10
+                            else
+                                h.FillColor = Color3.fromRGB(35, 220, 90)
+                                h.OutlineColor = Color3.fromRGB(175, 255, 185)
+                                h.FillTransparency = 0.12
+                            end
+                            h.OutlineTransparency = 0
+                            seen[bodyPart] = true
+                        end
+                    end
+                end
+            end
+        end
+        for key, h in pairs(thermalHighlights) do
+            if not seen[key] or not key.Parent then
+                h:Destroy()
+                thermalHighlights[key] = nil
+            end
+        end
+    end))
+    addConn(RunService.Heartbeat:Connect(function(dt)
+        if flashstepEnabled then updateFlashstep(dt) end
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if hum and hum.FloorMaterial ~= Enum.Material.Air then
+            geppoCurrent = 0
+        end
+        if speedEnabled and hum then
+            hum.WalkSpeed = tonumber(speedBox.Text) or 16
+        end
+        if tpWalkEnabled and hum and root and hum.MoveDirection.Magnitude > 0.05 then
+            root.CFrame = root.CFrame + hum.MoveDirection * tpWalkPower
+        end
+        -- Player Highlight ESP is updated by the throttled ESP renderer above.
+        -- Door ESP
+        if doorESP or nightVisionESP then
+            if tick() - lastDoorScan > 1.0 then
+                lastDoorScan = tick()
+                local doorParams = OverlapParams.new()
+                doorParams.FilterType = Enum.RaycastFilterType.Exclude
+                doorParams.FilterDescendantsInstances = {char}
+                doorParams.MaxParts = 500
+                local doorParts = root and workspace:GetPartBoundsInRadius(root.Position, 350, doorParams) or {}
+                local seenDoors = {}
+                for _, obj in ipairs(doorParts) do
+                    local ancestorModel = obj:FindFirstAncestorOfClass("Model")
+                    local doorNamed = obj.Name:lower():find("door") or obj.Name:lower():find("halloween")
+                    local modelNamed = ancestorModel and (ancestorModel.Name:lower():find("door") or ancestorModel.Name:lower():find("halloween"))
+                    if obj:IsA("BasePart") and (doorNamed or modelNamed) then
+                        local doorTarget = ancestorModel or obj
+                        seenDoors[doorTarget] = true
+                        if not doorHighlights[doorTarget] then
+                            local h = Instance.new("Highlight")
+                            h.Name = nightVisionESP and "DarkForgeNightVisionDoorHighlight" or "DarkForgeDoorESPHighlight"
+                            h.Adornee = doorTarget
+                            h.Parent = doorTarget
+                            doorHighlights[doorTarget] = h
+                        end
+                        local h = doorHighlights[doorTarget]
+                        h.Name = nightVisionESP and "DarkForgeNightVisionDoorHighlight" or "DarkForgeDoorESPHighlight"
+                        h.FillColor = nightVisionESP and Color3.fromRGB(85, 255, 135) or doorColor
+                        h.OutlineColor = nightVisionESP and Color3.fromRGB(190, 255, 205) or Color3.new(0, 0, 0)
+                        h.FillTransparency = nightVisionESP and 0.28 or doorFillTrans
+                        h.OutlineTransparency = nightVisionESP and 0 or doorOutlineTrans
+                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    end
+                end
+                for doorTarget, h in pairs(doorHighlights) do
+                    if not seenDoors[doorTarget] or not doorTarget.Parent then
+                        h:Destroy()
+                        doorHighlights[doorTarget] = nil
+                    end
+                end
+            end
+        end
+        -- FLIGHT
+        if flightEnabled and flightBV and root then
+            local cam = workspace.CurrentCamera
+            local dir = Vector3.zero
+            local forward = false
+            local back = false
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector forward = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector back = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.yAxis end
+            pcall(function()
+                local state = UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1)
+                if state then
+                    for _, inp in ipairs(state) do
+                        if inp.KeyCode == Enum.KeyCode.Thumbstick1 then
+                            local s = inp.Position
+                            if s.Magnitude > 0.15 then
+                                dir += cam.CFrame.LookVector * s.Y
+                                dir += cam.CFrame.RightVector * s.X
+                                if s.Y > 0.2 then forward = true end
+                                if s.Y < -0.2 then back = true end
+                            end
+                        end
+                    end
+                end
+            end)
+            if dir.Magnitude < 0.1 then
+                sprinting = false
+                flightBV.Velocity = Vector3.zero
+                playFlightAnim("idle")
+                targetFOV = originalFOV
+            else
+                if forward then
+                    targetFlightSpeed = flightBoost and 175 or 90
+                    targetFOV = originalFOV + (flightBoost and 42 or 20)
+                    playFlightAnim("forward")
+                elseif back then
+                    targetFlightSpeed = flightBoost and 75 or 35
+                    targetFOV = originalFOV
+                    playFlightAnim("back")
+                else
+                    targetFlightSpeed = 45
+                    targetFOV = originalFOV
+                end
+                flightSpeed = flightSpeed + (targetFlightSpeed - flightSpeed) * 0.16
+                flightBV.Velocity = dir.Unit * flightSpeed
+            end
+            updateFlightSpeedLines(forward and dir.Magnitude >= 0.1, dt)
+            cam.FieldOfView = cam.FieldOfView + (targetFOV - cam.FieldOfView) * 0.1
+            -- Camera pitch is authoritative. BodyGyro continuously forces the
+            -- complete 3D facing direction instead of lerping against Humanoid joints.
+            if not (naoyaMode and holdingActivate) and flightBG and flightBG.Parent then
+                local look = cam.CFrame.LookVector
+                if look.Magnitude > 0.001 then
+                    flightBG.CFrame = CFrame.lookAt(root.Position, root.Position + look.Unit, cam.CFrame.UpVector)
+                end
+            end
+        end
+        -- Naoya
+        if naoyaMode and holdingActivate and root then
+            local closest, dist = nil, 999
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                    local d = (p.Character.HumanoidRootPart.Position - root.Position).Magnitude
+                    if d < dist then dist = d closest = p.Character.HumanoidRootPart end
+                end
+            end
+            if closest then
+                local off = naoyaModeType == "infront" and closest.CFrame.LookVector * 3.5
+                    or naoyaModeType == "behind" and -closest.CFrame.LookVector * 3.5
+                    or naoyaModeType == "above" and Vector3.new(0, 6, 0)
+                    or Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+                root.CFrame = CFrame.new(closest.Position + off, closest.Position)
+            end
+        end
+    end))
+    print("[Ω V0IDZ HUB Ω] v" .. VERSION .. " loaded")
+end
+local function showStartupUpdateLog(onClose)
+    local oldLog = playerGui:FindFirstChild("DarkForgeStartupUpdateLog")
+    if oldLog then oldLog:Destroy() end
+    local logGui = create("ScreenGui", {
+        Name = "DarkForgeStartupUpdateLog", ResetOnSpawn = false,
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000
+    }, playerGui)
+    local shade = create("Frame", {
+        Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.28, BorderSizePixel = 0
+    }, logGui)
+    local panel = create("Frame", {
+        Size = UDim2.new(0, 480, 0, 350), Position = UDim2.new(0.5, -240, 0.5, -175),
+        BackgroundColor3 = BG, BorderSizePixel = 0
+    }, shade)
+    corner(panel, 10)
+    local header = create("TextLabel", {
+        Size = UDim2.new(1, -24, 0, 42), Position = UDim2.new(0, 12, 0, 8),
+        BackgroundTransparency = 1, Text = "Ω V0IDZ HUB Ω  •  UPDATE LOG  •  v" .. VERSION,
+        TextColor3 = currentAccent, Font = Enum.Font.GothamBold, TextSize = 16,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, panel)
+    local body = create("TextLabel", {
+        Size = UDim2.new(1, -32, 1, -112), Position = UDim2.new(0, 16, 0, 58),
+        BackgroundColor3 = BG2, BackgroundTransparency = 0.15,
+        Text = "Welcome to Ω V0IDZ HUB Ω v" .. VERSION .. "\n\n" ..
+            "• Rejoin Server and Server Hop buttons in General.\n" ..
+            "• Tab sorting controls added to Settings.\n" ..
+            "• Update Log moved to the first main-UI tab.\n" ..
+            "• This startup log now appears before the main UI. Close it to continue.\n" ..
+            "• Existing features are retained.",
+        TextColor3 = TEXT, Font = Enum.Font.Gotham, TextSize = 13,
+        TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, panel)
+    corner(body, 7)
+    local close = create("TextButton", {
+        Size = UDim2.new(1, -32, 0, 36), Position = UDim2.new(0, 16, 1, -48),
+        BackgroundColor3 = currentAccent, Text = "Close Update Log & Continue",
+        TextColor3 = Color3.new(0, 0, 0), Font = Enum.Font.GothamBold, TextSize = 13,
+        AutoButtonColor = true
+    }, panel)
+    corner(close, 7)
+    local closed = false
+    close.MouseButton1Click:Connect(function()
+        if closed then return end
+        closed = true
+        logGui:Destroy()
+        onClose()
+    end)
+end
+
+playIntro(function()
+    showStartupUpdateLog(function()
+        buildUI()
+    end)
+end)
